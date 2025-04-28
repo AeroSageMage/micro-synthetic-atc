@@ -23,7 +23,7 @@ This project provides a foundation for simulating virtual Air Traffic Control (A
    ```
 3. The GUI will display the current detected area, location, taxiway, runway, heading, and speed.
 4. Use the "Save Position" button to export the current state for debugging or sharing.
-
+![screenshot of the position GUI open](screenshots/screenshot_position_gui_open_data_sender.png)
 ## Project Structure
 - `position_detector.py` — Core logic for detecting aircraft ground state
 - `position_detector_gui.py` — Tkinter GUI for live visualization and debugging
@@ -51,7 +51,7 @@ Open source — feel free to use, modify, and share.
   ```bash
   python airport_visualizer.py
   ```
-
+![Screenshot of the map visualizing the JSON data and the threshold areas](screenshots/airport_area_visualizer.png)
 ### Current Status
 - **Proof of Concept:** Currently, the system works only for Graz Airport (Austria), specifically taxiway D to runway 17C.
 - The structure is ready for quick expansion: just add more airport data files and update references.
