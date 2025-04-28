@@ -37,6 +37,25 @@ This project provides a foundation for simulating virtual Air Traffic Control (A
 ## License
 Open source — feel free to use, modify, and share.
 
+## Airport Data & Visualization
+
+### How Airport Data Works
+- Airport layouts are defined in JSON files (see `airport_data/graz_airport.json` for an example).
+- Each file describes runways, taxiways (with segments), parking positions, and holding points, using real-world coordinates and properties.
+- The format is designed to be easily extensible: add new airports by creating similar JSON files and updating the code to reference them.
+
+### Visualizing Airport Zones
+- Use `airport_visualizer.py` to view and debug the active airport zones (runways, taxiways, parking, holding points) on an interactive map.
+- The visualizer helps you see how detection areas are defined and tune thresholds for each area type.
+- Run it with:
+  ```bash
+  python airport_visualizer.py
+  ```
+
+### Current Status
+- **Proof of Concept:** Currently, the system works only for Graz Airport (Austria), specifically taxiway D to runway 17C.
+- The structure is ready for quick expansion: just add more airport data files and update references.
+
 ---
 
 *Let's build the next generation of virtual ATC and ground handling together!* 
