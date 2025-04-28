@@ -1,0 +1,11 @@
+# Ignore the do_not_use folder
+/do_not_use/
+
+# Ignore all .log files
+*.log
+
+# Ignore Python cache directories
+__pycache__/
+
+# Ignore all .pyc files
+*.pyc 
