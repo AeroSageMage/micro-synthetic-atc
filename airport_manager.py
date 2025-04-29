@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import List, Tuple, Dict, Optional
 from pathlib import Path
 import math
-from geo_utils import calculate_heading, lat_lon_to_meters, distance_to_segment, haversine_distance
+from utils.geo_utils import calculate_heading, lat_lon_to_meters, distance_to_segment, haversine_distance
 
 @dataclass
 class Runway:

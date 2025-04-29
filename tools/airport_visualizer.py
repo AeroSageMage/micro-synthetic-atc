@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import List, Tuple, Dict
 import math
 import os
-from geo_utils import calculate_heading
+from utils.geo_utils import calculate_heading
 
 @dataclass
 class Runway:

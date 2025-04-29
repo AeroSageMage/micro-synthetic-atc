@@ -9,7 +9,7 @@ from typing import Optional
 from position_detector import PositionDetector, AircraftArea
 from pathlib import Path
 from airport_manager import AirportManager
-from geo_utils import haversine_distance
+from utils.geo_utils import haversine_distance
 from tkintermapview import TkinterMapView
 from PIL import Image, ImageTk
 

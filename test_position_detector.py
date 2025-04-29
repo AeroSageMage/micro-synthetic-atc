@@ -6,8 +6,8 @@ import json
 import sys
 import os
 
-# Add Inspiration directory to Python path
-sys.path.append(os.path.join(os.path.dirname(__file__), 'Inspiration'))
+# Add tools directory to Python path
+sys.path.append(os.path.join(os.path.dirname(__file__), 'tools'))
 
 from position_detector import PositionDetector, AircraftArea
 from position_detector_gui import PositionDetectorGUI
@@ -26,7 +26,7 @@ class TestPositionDetector(unittest.TestCase):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         
         # Load test data
-        self.test_data, _, _ = extract_gps_from_csv("Inspiration/output_recorder/output_GPS_DATA.csv")
+        self.test_data, _, _ = extract_gps_from_csv("tools/output_recorder/output_GPS_DATA.csv")
         
         # Expected test results based on actual airport layout positions
         self.expected_results = {

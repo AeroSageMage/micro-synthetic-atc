@@ -2,7 +2,7 @@ import requests
 import json
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
-from geo_utils import haversine_distance, calculate_heading
+from utils.geo_utils import haversine_distance, calculate_heading
 
 @dataclass
 class Node:

@@ -1,3 +1,141 @@
+# System Architecture and Component Interactions
+
+## Overview
+The VirtualATC system is designed to simulate Air Traffic Control (ATC) operations in a single-player environment. The system consists of several key components that work together to detect aircraft positions, manage airport layouts, and provide a user interface for monitoring and control.
+
+## Core Components
+
+### 1. Airport Manager (`airport_manager.py`)
+**Responsibilities:**
+- Manages airport layout data including runways, taxiways, parking positions, and holding points
+- Provides spatial queries and calculations for aircraft positioning
+- Handles airport-specific operations and validations
+
+**Key Classes:**
+- `Runway`: Represents airport runways with properties like thresholds, width, and heading
+- `Taxiway`: Manages taxiway segments and their connections
+- `ParkingPosition`: Represents aircraft parking spots
+- `HoldingPoint`: Manages holding positions for aircraft
+
+**Interactions:**
+- Used by `PositionDetector` for spatial queries
+- Provides data to GUI for visualization
+- Loads and manages airport layout data from JSON files
+
+### 2. Position Detector (`position_detector.py`)
+**Responsibilities:**
+- Detects and classifies aircraft positions within the airport
+- Processes real-time GPS and attitude data
+- Determines aircraft state (parking, taxiing, on runway, etc.)
+
+**Key Classes:**
+- `PositionDetector`: Main class for position detection
+- `PositionInfo`: Data structure for position information
+- `AircraftArea`: Enum for different aircraft states
+
+**Interactions:**
+- Receives data from UDP receiver
+- Uses `AirportManager` for spatial queries
+- Provides position updates to GUI
+
+### 3. GUI (`position_detector_gui.py`)
+**Responsibilities:**
+- Provides visual interface for monitoring aircraft positions
+- Displays airport layout and aircraft position
+- Offers controls for system operation
+
+**Key Features:**
+- Interactive map display
+- Real-time position updates
+- Debug information display
+- Airport layout selection
+- Aircraft marker visualization
+
+**Interactions:**
+- Communicates with `PositionDetector` for position updates
+- Uses `AirportManager` for airport layout data
+- Provides user interface for system control
+
+### 4. Utilities (`utils/`)
+**Responsibilities:**
+- Provides common utility functions
+- Handles geographical calculations
+- Manages coordinate transformations
+
+**Key Components:**
+- `geo_utils.py`: Geographical calculations and transformations
+
+## Data Flow
+
+1. **Data Acquisition:**
+   - UDP receiver captures real-time GPS and attitude data
+   - Data is processed by `PositionDetector`
+
+2. **Position Processing:**
+   - `PositionDetector` uses `AirportManager` to determine aircraft location
+   - Position is classified into specific areas (runway, taxiway, etc.)
+   - Position information is formatted for display
+
+3. **Visualization:**
+   - GUI receives position updates
+   - Updates map display and aircraft marker
+   - Shows debug information
+
+## Component Dependencies
+
+```mermaid
+graph TD
+    A[UDP Receiver] --> B[Position Detector]
+    B --> C[Airport Manager]
+    B --> D[GUI]
+    C --> D
+    E[Utils] --> B
+    E --> C
+```
+
+## Key Interactions
+
+1. **Position Detection:**
+   - `PositionDetector` receives GPS data
+   - Queries `AirportManager` for spatial information
+   - Determines aircraft state and location
+   - Updates GUI with position information
+
+2. **Airport Management:**
+   - `AirportManager` loads and processes airport layout
+   - Provides spatial queries for position detection
+   - Supplies layout data for GUI visualization
+
+3. **User Interface:**
+   - GUI displays real-time position updates
+   - Shows airport layout and aircraft position
+   - Provides controls for system operation
+   - Displays debug information
+
+## Error Handling
+
+- Each component implements its own error handling
+- Logging system captures errors and debug information
+- GUI provides user feedback for errors
+- Position detection includes fallback mechanisms
+
+## Future Extensions
+
+1. **ATC Communication:**
+   - Integration of ATC communication patterns
+   - Voice recognition and synthesis
+   - Standard phraseology implementation
+
+2. **Enhanced Visualization:**
+   - 3D airport visualization
+   - Traffic pattern display
+   - Weather information integration
+
+3. **Advanced Features:**
+   - Multiple aircraft tracking
+   - Conflict detection
+   - Automated ATC instructions
+
 # Implementation Concepts
 
 ## 1. Basic Radio Interface

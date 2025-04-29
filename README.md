@@ -13,7 +13,7 @@ This project provides a foundation for simulating virtual Air Traffic Control (A
 ### Prerequisites
 - Python 3.8+
 - Tkinter (usually included with Python)
-- Any additional dependencies listed in your environment (e.g., for UDP data, see `Inspiration/rewinger.py`)
+- Any additional dependencies listed in your environment (e.g., for UDP data, see `tools/rewinger.py`)
 
 ### Running the Position Detector GUI
 1. Ensure your Aerofly or simulator is sending UDP GPS/attitude data as expected.

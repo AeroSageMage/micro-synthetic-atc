@@ -4,12 +4,12 @@ import json
 import time
 from enum import Enum, auto
 from airport_manager import AirportManager, Runway, Taxiway, ParkingPosition, HoldingPoint
-from Inspiration.rewinger import UDPReceiver, GPSData, AttitudeData
+from tools.rewinger import UDPReceiver, GPSData, AttitudeData
 import sys
 import logging
 from datetime import datetime
 import math
-from geo_utils import haversine_distance, calculate_heading, distance_to_segment
+from utils.geo_utils import haversine_distance, calculate_heading, distance_to_segment
 
 class AircraftArea(Enum):
     NOT_DETECTED = auto()

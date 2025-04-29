@@ -1,7 +1,7 @@
 import re
 
 points = []
-with open("Inspiration/output_recorder/output_GPS_DATA.csv") as f:
+with open("tools/output_recorder/output_GPS_DATA.csv") as f:
     for line in f:
         match = re.search(r"latitude=([0-9.]+), altitude=.*?ground_speed=([0-9.]+)", line)
         lon_match = re.search(r"longitude=([0-9.]+)", line)
