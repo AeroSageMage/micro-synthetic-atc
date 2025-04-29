@@ -37,38 +37,28 @@ def calculate_heading(lat1: float, lon1: float, lat2: float, lon2: float) -> flo
 @dataclass
 class Runway:
     name: str
-    threshold_coords: List[float]
-    length: float
+    threshold1_coords: List[float]
+    threshold2_coords: List[float]
     width: float
+    length: float
     _heading: Optional[float] = None
 
-    def __init__(self, name: str, threshold_coords: List[float], length: float, width: float, heading: Optional[float] = None):
+    def __init__(self, name: str, threshold1_coords: List[float], threshold2_coords: List[float], 
+                 width: float, length: float, heading: Optional[float] = None):
         self.name = name
-        self.length = length
+        self.threshold1_coords = threshold1_coords
+        self.threshold2_coords = threshold2_coords
         self.width = width
+        self.length = length
         self._heading = heading
-        
-        # Handle both single threshold point and dual threshold point cases
-        if len(threshold_coords) == 2:
-            # Single threshold point provided, calculate second point based on heading and length
-            lat1, lon1 = threshold_coords
-            # Convert length to degrees (approximate)
-            length_deg = length / 111000  # 1 degree ≈ 111km
-            # Calculate second point based on heading
-            lat2 = lat1 + length_deg * math.cos(math.radians(heading))
-            lon2 = lon1 + length_deg * math.sin(math.radians(heading))
-            self.threshold_coords = [lat1, lon1, lat2, lon2]
-        else:
-            # Dual threshold points provided
-            self.threshold_coords = threshold_coords
 
     @property
     def heading(self) -> float:
         if self._heading is not None:
             return self._heading
         # Calculate heading from threshold coordinates
-        lat1, lon1 = self.threshold_coords[:2]
-        lat2, lon2 = self.threshold_coords[2:]
+        lat1, lon1 = self.threshold1_coords
+        lat2, lon2 = self.threshold2_coords
         return calculate_heading(lat1, lon1, lat2, lon2)
 
     def _lat_lon_to_meters(self, lat, lon):
@@ -111,8 +101,8 @@ class Runway:
         """
         # Convert all coordinates to meters for accurate distance calculations
         pos_meters = self._lat_lon_to_meters(float(position[0]), float(position[1]))
-        threshold1_meters = self._lat_lon_to_meters(float(self.threshold_coords[0]), float(self.threshold_coords[1]))
-        threshold2_meters = self._lat_lon_to_meters(float(self.threshold_coords[2]), float(self.threshold_coords[3]))
+        threshold1_meters = self._lat_lon_to_meters(float(self.threshold1_coords[0]), float(self.threshold1_coords[1]))
+        threshold2_meters = self._lat_lon_to_meters(float(self.threshold2_coords[0]), float(self.threshold2_coords[1]))
         
         # Calculate runway center line vector
         runway_vector = (threshold2_meters[0] - threshold1_meters[0], 
@@ -230,6 +220,9 @@ class ParkingPosition:
     name: str
     coords: Tuple[float, float]
     type: str
+    elevation: float
+    heading: float
+    size: float
     
     def distance_to(self, position: Tuple[float, float]) -> float:
         """Calculate the distance to another position in degrees."""
@@ -240,9 +233,12 @@ class ParkingPosition:
 class HoldingPoint:
     name: str
     coords: Tuple[float, float]
-    type: str
-    runway: Optional[str] = None
-    taxiway: Optional[str] = None
+    associated_with: str
+
+    def distance_to(self, position: Tuple[float, float]) -> float:
+        """Calculate the distance to another position in degrees."""
+        return ((self.coords[0] - position[0])**2 + 
+                (self.coords[1] - position[1])**2)**0.5
 
 class AirportManager:
     def __init__(self, layout_file: str = "airport_layout.json"):
@@ -253,7 +249,6 @@ class AirportManager:
         self.taxiways: List[Taxiway] = []
         self.parking_positions: List[ParkingPosition] = []
         self.holding_points: List[HoldingPoint] = []
-        
         self.load_layout()
     
     def load_layout(self) -> None:
@@ -262,102 +257,63 @@ class AirportManager:
             with open(self.layout_file, 'r') as f:
                 data = json.load(f)
             
-            self.name = data['name']
-            self.icao = data['icao']
+            self.name = data.get('name', '')
+            self.icao = data.get('icao', '')
             
             # Load runways
             self.runways = []
-            for r in data['runways']:
-                # Handle both threshold_coords and threshold1_coords/threshold2_coords formats
-                if 'threshold_coords' in r:
-                    threshold_coords = r['threshold_coords']
-                else:
-                    # Combine threshold1 and threshold2 coordinates
-                    threshold_coords = r['threshold1_coords'] + r['threshold2_coords']
-                
-                self.runways.append(
-                    Runway(
-                        name=r['name'],
-                        threshold_coords=threshold_coords,
-                        length=r['length'],
-                        width=r['width'],
-                        heading=r.get('heading')  # Optional heading
-                    )
+            for runway_data in data.get('runways', []):
+                runway = Runway(
+                    name=runway_data['name'],
+                    threshold1_coords=runway_data['threshold1_coords'],
+                    threshold2_coords=runway_data['threshold2_coords'],
+                    width=runway_data['width'],
+                    length=runway_data['length']
                 )
+                self.runways.append(runway)
             
             # Load taxiways
             self.taxiways = []
-            for t in data['taxiways']:
-                print(f"DEBUG: Processing taxiway {t['name']}")
-                print(f"DEBUG: Segments: {t['segments']}")
+            for taxiway_data in data.get('taxiways', []):
                 segments = []
-                points = t['segments']
-                width = t.get('width', 23)  # Default width if not specified
-                
-                # Handle both segment formats
-                if isinstance(points[0], dict) and 'start' in points[0]:
-                    # Format 1: Explicit start/end points
-                    for segment in points:
-                        segments.append(
-                            TaxiwaySegment(
-                                start=tuple(segment['start']),
-                                end=tuple(segment['end']),
-                                width=segment.get('width', width)
-                            )
-                        )
-                else:
-                    # Format 2: List of points
-                    for i in range(len(points) - 1):
-                        print(f"DEBUG: Creating segment from {points[i]} to {points[i + 1]}")
-                        segments.append(
-                            TaxiwaySegment(
-                                start=tuple(points[i]),
-                                end=tuple(points[i + 1]),
-                                width=width
-                            )
-                        )
-                
-                self.taxiways.append(
-                    Taxiway(
-                        name=t['name'],
-                        segments=segments
+                for segment_data in taxiway_data['segments']:
+                    segment = TaxiwaySegment(
+                        start=tuple(segment_data['start']),
+                        end=tuple(segment_data['end']),
+                        width=segment_data['width']
                     )
+                    segments.append(segment)
+                taxiway = Taxiway(
+                    name=taxiway_data['name'],
+                    segments=segments
                 )
+                self.taxiways.append(taxiway)
             
             # Load parking positions
             self.parking_positions = []
-            for p in data['parking_positions']:
-                self.parking_positions.append(
-                    ParkingPosition(
-                        name=p['name'],
-                        coords=tuple(p['coords']),
-                        type=p['type']
-                    )
+            for parking_data in data.get('parking_positions', []):
+                parking = ParkingPosition(
+                    name=parking_data['name'],
+                    coords=tuple(parking_data['coords']),
+                    type=parking_data['type'],
+                    elevation=parking_data['elevation'],
+                    heading=parking_data['heading'],
+                    size=parking_data['size']
                 )
+                self.parking_positions.append(parking)
             
             # Load holding points
             self.holding_points = []
-            for h in data['holding_points']:
-                self.holding_points.append(
-                    HoldingPoint(
-                        name=h['name'],
-                        coords=tuple(h['coords']),
-                        type='Runway',  # Default type
-                        runway=h.get('associated_with')  # Optional runway association
-                    )
+            for holding_data in data.get('holding_points', []):
+                holding = HoldingPoint(
+                    name=holding_data['name'],
+                    coords=tuple(holding_data['coords']),
+                    associated_with=holding_data['associated_with']
                 )
+                self.holding_points.append(holding)
             
         except Exception as e:
-            print(f"Error loading airport layout: {e}")
-            print("Please check the format of your airport layout file.")
-            print("Expected formats:")
-            print("1. Taxiway segments:")
-            print("   [[lat, lon], [lat, lon], ...] with optional \"width\" field")
-            print("2. Parking positions:")
-            print("   {\"name\": name, \"coords\": [lat, lon], \"type\": type}")
-            print("3. Holding points:")
-            print("   {\"name\": name, \"coords\": [lat, lon], \"associated_with\": runway}")
-            raise
+            raise ValueError(f"Error loading airport layout: {str(e)}")
     
     def get_nearest_parking(self, position: Tuple[float, float], threshold: float = 0.0002) -> Optional[ParkingPosition]:
         """Find the nearest parking position to the given coordinates.
@@ -548,8 +504,8 @@ class AirportManager:
             
         # Convert all coordinates to meters for accurate distance calculations
         pos_meters = self._lat_lon_to_meters(float(position[0]), float(position[1]))
-        threshold1_meters = self._lat_lon_to_meters(float(runway.threshold_coords[0]), float(runway.threshold_coords[1]))
-        threshold2_meters = self._lat_lon_to_meters(float(runway.threshold_coords[2]), float(runway.threshold_coords[3]))
+        threshold1_meters = self._lat_lon_to_meters(float(runway.threshold1_coords[0]), float(runway.threshold1_coords[1]))
+        threshold2_meters = self._lat_lon_to_meters(float(runway.threshold2_coords[0]), float(runway.threshold2_coords[1]))
         
         # Calculate runway center line vector
         runway_vector = (threshold2_meters[0] - threshold1_meters[0], 

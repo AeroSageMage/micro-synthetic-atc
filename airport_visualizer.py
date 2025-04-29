@@ -1,9 +1,11 @@
 import tkinter as tk
+from tkinter import filedialog
 from tkintermapview import TkinterMapView
 import json
 from dataclasses import dataclass
 from typing import List, Tuple
 import math
+import os
 
 @dataclass
 class Runway:
@@ -36,14 +38,19 @@ class HoldingPoint:
     associated_with: str
 
 class AirportVisualizer:
-    def __init__(self, layout_file: str = "airport_data/graz_airport.json"):
+    def __init__(self):
         self.root = tk.Tk()
         self.root.title("Airport Area Visualizer")
         self.root.geometry("1200x800")
         
+        # Create initial file selection dialog
+        self.layout_file = self.select_airport_file()
+        if not self.layout_file:
+            self.root.destroy()
+            return
+            
         # Load airport layout
-        with open(layout_file, 'r') as f:
-            self.layout = json.load(f)
+        self.load_airport_data()
             
         # Initialize map
         self.map_widget = TkinterMapView(self.root, width=1000, height=800, corner_radius=0)
@@ -55,16 +62,12 @@ class AirportVisualizer:
         self.map_widget.bind("<Motion>", self.update_cursor_label)
         
         # Set initial position to airport center
-        center_lat = (self.layout['runways'][0]['threshold1_coords'][0] + 
-                     self.layout['runways'][0]['threshold2_coords'][0]) / 2
-        center_lon = (self.layout['runways'][0]['threshold1_coords'][1] + 
-                     self.layout['runways'][0]['threshold2_coords'][1]) / 2
-        self.map_widget.set_position(center_lat, center_lon)
-        self.map_widget.set_zoom(16)
+        self.set_initial_map_position()
         
         # Initialize control variables
         self.show_runways = tk.BooleanVar(value=True)
         self.show_taxiways = tk.BooleanVar(value=True)
+        self.show_taxiway_markers = tk.BooleanVar(value=False)  # New variable for taxiway markers
         self.show_parking = tk.BooleanVar(value=True)
         self.show_holding = tk.BooleanVar(value=True)
         self.parking_threshold = tk.DoubleVar(value=0.00005)  # 5 meters
@@ -77,19 +80,81 @@ class AirportVisualizer:
         # Draw all areas
         self.draw_areas()
         
+    def select_airport_file(self) -> str:
+        """Show file selection dialog and return the selected file path."""
+        # Set initial directory to airport_data if it exists
+        initial_dir = "airport_data" if os.path.exists("airport_data") else "."
+        
+        file_path = filedialog.askopenfilename(
+            title="Select Airport JSON File",
+            initialdir=initial_dir,
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        
+        if not file_path:
+            print("No file selected. Exiting...")
+            return ""
+            
+        return file_path
+        
+    def load_airport_data(self):
+        """Load the airport data from the selected file."""
+        try:
+            with open(self.layout_file, 'r') as f:
+                self.layout = json.load(f)
+        except Exception as e:
+            tk.messagebox.showerror("Error", f"Failed to load airport data: {str(e)}")
+            self.root.destroy()
+            
+    def set_initial_map_position(self):
+        """Set the initial map position based on the airport data."""
+        if not self.layout.get('runways'):
+            # If no runways, try to find center from other features
+            all_coords = []
+            for feature in ['runways', 'taxiways', 'parking_positions', 'holding_points']:
+                if feature in self.layout:
+                    for item in self.layout[feature]:
+                        if 'coords' in item:
+                            all_coords.append(item['coords'])
+                        elif 'threshold1_coords' in item:
+                            all_coords.append(item['threshold1_coords'])
+                            all_coords.append(item['threshold2_coords'])
+            
+            if all_coords:
+                center_lat = sum(coord[0] for coord in all_coords) / len(all_coords)
+                center_lon = sum(coord[1] for coord in all_coords) / len(all_coords)
+            else:
+                center_lat, center_lon = 0, 0  # Default to 0,0 if no coordinates found
+        else:
+            # Use first runway's center as initial position
+            runway = self.layout['runways'][0]
+            center_lat = (runway['threshold1_coords'][0] + runway['threshold2_coords'][0]) / 2
+            center_lon = (runway['threshold1_coords'][1] + runway['threshold2_coords'][1]) / 2
+            
+        self.map_widget.set_position(center_lat, center_lon)
+        self.map_widget.set_zoom(16)
+        
     def setup_control_panel(self):
         """Set up the control panel on the right side."""
         control_frame = tk.Frame(self.root, width=200)
         control_frame.pack(side="right", fill="y", padx=10)
         
-        # Add title
-        tk.Label(control_frame, text="Airport Areas", font=("Arial", 12, "bold")).pack(pady=10)
+        # Add title with airport name
+        airport_name = self.layout.get('name', 'Unknown Airport')
+        tk.Label(control_frame, text=f"{airport_name}", font=("Arial", 12, "bold")).pack(pady=10)
         
         # Add checkboxes for each area type
         tk.Checkbutton(control_frame, text="Show Runways", variable=self.show_runways,
                       command=self.redraw_areas).pack(anchor="w", pady=5)
-        tk.Checkbutton(control_frame, text="Show Taxiways", variable=self.show_taxiways,
-                      command=self.redraw_areas).pack(anchor="w", pady=5)
+        
+        # Taxiway controls in a subframe
+        taxiway_frame = tk.Frame(control_frame)
+        taxiway_frame.pack(anchor="w", pady=5)
+        tk.Checkbutton(taxiway_frame, text="Show Taxiways", variable=self.show_taxiways,
+                      command=self.redraw_areas).pack(anchor="w")
+        tk.Checkbutton(taxiway_frame, text="Show Taxiway Markers", variable=self.show_taxiway_markers,
+                      command=self.redraw_areas).pack(anchor="w", padx=20)
+        
         tk.Checkbutton(control_frame, text="Show Parking", variable=self.show_parking,
                       command=self.redraw_areas).pack(anchor="w", pady=5)
         tk.Checkbutton(control_frame, text="Show Holding Points", variable=self.show_holding,
@@ -112,8 +177,24 @@ class AirportVisualizer:
                  command=self.update_thresholds).pack(pady=10)
         
         # Add reload data button
-        tk.Button(control_frame, text="Reload Data", 
-                 command=self.reload_data).pack(pady=10)
+        tk.Button(control_frame, text="Load Different Airport", 
+                 command=self.load_different_airport).pack(pady=10)
+        
+    def load_different_airport(self):
+        """Load a different airport file."""
+        new_file = self.select_airport_file()
+        if new_file:
+            self.layout_file = new_file
+            self.load_airport_data()
+            self.set_initial_map_position()
+            self.redraw_areas()
+            # Update the title with new airport name
+            for widget in self.root.winfo_children():
+                if isinstance(widget, tk.Frame):
+                    for child in widget.winfo_children():
+                        if isinstance(child, tk.Label) and child.cget("font") == ("Arial", 12, "bold"):
+                            child.config(text=self.layout.get('name', 'Unknown Airport'))
+                            break
         
     def draw_areas(self):
         """Draw all airport areas on the map."""
@@ -173,15 +254,17 @@ class AirportVisualizer:
             centerline.append(taxiway['segments'][-1]['end'])
             self.draw_surface_polygon(centerline, taxiway['segments'][0]['width'], fill_color="#888888", outline_color="white")
             
-            # Add taxiway name marker at each segment center
-            for segment in taxiway['segments']:
-                center_lat = (segment['start'][0] + segment['end'][0]) / 2
-                center_lon = (segment['start'][1] + segment['end'][1]) / 2
-                self.map_widget.set_marker(
-                    center_lat, center_lon,
-                    text=taxiway['name'],
-                    text_color="black"
-                )
+            # Only add taxiway name markers if enabled
+            if self.show_taxiway_markers.get():
+                # Add taxiway name marker at each segment center
+                for segment in taxiway['segments']:
+                    center_lat = (segment['start'][0] + segment['end'][0]) / 2
+                    center_lon = (segment['start'][1] + segment['end'][1]) / 2
+                    self.map_widget.set_marker(
+                        center_lat, center_lon,
+                        text=taxiway['name'],
+                        text_color="black"
+                    )
             
     def draw_parking(self):
         """Draw parking positions with their detection areas."""
@@ -318,12 +401,6 @@ class AirportVisualizer:
             self.cursor_label.config(text=f"Map Center: Lat: {lat:.6f}, Lon: {lon:.6f}")
         except Exception:
             self.cursor_label.config(text="Lat: ---, Lon: ---")
-        
-    def reload_data(self):
-        """Reload the JSON data and redraw all areas."""
-        with open("./airport_data/graz_airport.json", 'r') as f:
-            self.layout = json.load(f)
-        self.redraw_areas()
         
     def run(self):
         """Start the visualization."""
