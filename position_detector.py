@@ -9,6 +9,7 @@ import sys
 import logging
 from datetime import datetime
 import math
+from geo_utils import haversine_distance, calculate_heading, distance_to_segment
 
 class AircraftArea(Enum):
     NOT_DETECTED = auto()
@@ -36,15 +37,10 @@ class PositionDetector:
         self.last_update = None
         
         # Setup logging
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_file = f"position_detector_{timestamp}.log"
         logging.basicConfig(
             level=logging.DEBUG,
             format='%(asctime)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler(log_file),
-                logging.StreamHandler(sys.stdout)
-            ]
+            handlers=[logging.StreamHandler(sys.stdout)]
         )
         self.logger = logging.getLogger(__name__)
         
@@ -53,119 +49,81 @@ class PositionDetector:
         print(f"Starting position detection for {self.airport_manager.name} ({self.airport_manager.icao})")
         self.udp_receiver.start_receiving()
         
-    def detect_position(self, coords: Tuple[float, float], heading: float) -> Dict:
-        """Detect the aircraft's position and return detailed information."""
-        position_info = {
-            'position': 'Unknown',
-            'nearest_runway': None,
-            'distance_to_center': float('inf'),
-            'nearest_taxiway': None,
-            'distance_to_taxiway': float('inf'),
-            'nearest_parking': None,
-            'parking_type': None,
-            'parking_elevation': None,
-            'parking_heading': None,
-            'parking_size': None,
-            'nearest_holding_point': None,
-            'holding_point_association': None
-        }
+    def detect_position(self, coordinates: Tuple[float, float], heading: float) -> PositionInfo:
+        """Detect the aircraft's position and provide detailed information."""
+        lat, lon = coordinates
         
-        # Check if we're on a runway
+        # Initialize with default NOT_DETECTED area
+        info = PositionInfo(
+            area=AircraftArea.NOT_DETECTED,
+            heading=heading
+        )
+        
+        # Find nearest runway
+        nearest_runway = None
+        min_distance = float('inf')
+        
         for runway in self.airport_manager.runways:
-            distance = runway.distance_to(coords)
-            if distance < 50:  # Within 50 meters of runway centerline
-                position_info['position'] = 'On Runway'
-                position_info['nearest_runway'] = runway.name
-                position_info['distance_to_center'] = distance
-                break
-        
-        # Check if we're on a taxiway
-        if position_info['position'] == 'Unknown':
-            for taxiway in self.airport_manager.taxiways:
-                distance = taxiway.distance_to(coords)
-                if distance < taxiway.width / 2:  # Within taxiway width
-                    position_info['position'] = 'On Taxiway'
-                    position_info['nearest_taxiway'] = taxiway.name
-                    position_info['distance_to_taxiway'] = distance
-                    break
-        
-        # Check if we're at a parking position
-        if position_info['position'] == 'Unknown':
-            for parking in self.airport_manager.parking_positions:
-                distance = parking.distance_to(coords)
-                if distance < 10:  # Within 10 meters of parking position
-                    position_info['position'] = 'At Parking'
-                    position_info['nearest_parking'] = parking.name
-                    position_info['parking_type'] = parking.type
-                    position_info['parking_elevation'] = parking.elevation
-                    position_info['parking_heading'] = parking.heading
-                    position_info['parking_size'] = parking.size
-                    break
-        
-        # Check if we're at a holding point
-        if position_info['position'] == 'Unknown':
-            for holding_point in self.airport_manager.holding_points:
-                distance = holding_point.distance_to(coords)
-                if distance < 10:  # Within 10 meters of holding point
-                    position_info['position'] = 'At Holding Point'
-                    position_info['nearest_holding_point'] = holding_point.name
-                    position_info['holding_point_association'] = holding_point.associated_with
-                    break
-        
-        # If still unknown, find nearest features
-        if position_info['position'] == 'Unknown':
-            # Find nearest runway
-            min_distance = float('inf')
-            nearest_runway = None
-            for runway in self.airport_manager.runways:
-                distance = runway.distance_to(coords)
-                if distance < min_distance:
-                    min_distance = distance
-                    nearest_runway = runway
-            if nearest_runway:
-                position_info['nearest_runway'] = nearest_runway.name
-                position_info['distance_to_center'] = min_distance
+            distance = runway.distance_to_center((lat, lon))
+            if distance < min_distance:
+                min_distance = distance
+                nearest_runway = runway
+                
+        if nearest_runway:
+            info.runway = nearest_runway.name
+            info.distance_to_center = min_distance
             
-            # Find nearest taxiway
-            min_distance = float('inf')
-            nearest_taxiway = None
-            for taxiway in self.airport_manager.taxiways:
-                distance = taxiway.distance_to(coords)
-                if distance < min_distance:
-                    min_distance = distance
-                    nearest_taxiway = taxiway
-            if nearest_taxiway:
-                position_info['nearest_taxiway'] = nearest_taxiway.name
-                position_info['distance_to_taxiway'] = min_distance
-            
-            # Find nearest parking
-            min_distance = float('inf')
-            nearest_parking = None
-            for parking in self.airport_manager.parking_positions:
-                distance = parking.distance_to(coords)
-                if distance < min_distance:
-                    min_distance = distance
-                    nearest_parking = parking
-            if nearest_parking:
-                position_info['nearest_parking'] = nearest_parking.name
-                position_info['parking_type'] = nearest_parking.type
-                position_info['parking_elevation'] = nearest_parking.elevation
-                position_info['parking_heading'] = nearest_parking.heading
-                position_info['parking_size'] = nearest_parking.size
-            
-            # Find nearest holding point
-            min_distance = float('inf')
-            nearest_holding_point = None
-            for holding_point in self.airport_manager.holding_points:
-                distance = holding_point.distance_to(coords)
-                if distance < min_distance:
-                    min_distance = distance
-                    nearest_holding_point = holding_point
-            if nearest_holding_point:
-                position_info['nearest_holding_point'] = nearest_holding_point.name
-                position_info['holding_point_association'] = nearest_holding_point.associated_with
+        # Find nearest taxiway
+        nearest_taxiway = None
+        min_distance = float('inf')
         
-        return position_info
+        for taxiway in self.airport_manager.taxiways:
+            distance = taxiway.distance_to((lat, lon))
+            if distance < min_distance:
+                min_distance = distance
+                nearest_taxiway = taxiway
+                
+        if nearest_taxiway:
+            info.taxiway = nearest_taxiway.name
+            
+        # Find nearest parking position
+        nearest_parking = None
+        min_distance = float('inf')
+        
+        for parking in self.airport_manager.parking_positions:
+            distance = parking.distance_to((lat, lon))
+            if distance < min_distance:
+                min_distance = distance
+                nearest_parking = parking
+                
+        if nearest_parking:
+            info.specific_location = nearest_parking.name
+            
+        # Find nearest holding point
+        nearest_holding = None
+        min_distance = float('inf')
+        
+        for holding in self.airport_manager.holding_points:
+            distance = holding.distance_to((lat, lon))
+            if distance < min_distance:
+                min_distance = distance
+                nearest_holding = holding
+                
+        if nearest_holding:
+            info.specific_location = nearest_holding.name
+            info.runway = nearest_holding.associated_with
+            
+        # Determine area based on position and conditions
+        if info.specific_location and info.specific_location.startswith("Parking"):
+            info.area = AircraftArea.AT_PARKING
+        elif info.taxiway:
+            info.area = AircraftArea.ON_TAXIWAY
+        elif info.specific_location and info.specific_location.startswith("H"):
+            info.area = AircraftArea.AT_HOLDING_POINT
+        elif info.runway and info.distance_to_center and info.distance_to_center < 22.5:  # Half of runway width
+            info.area = AircraftArea.ON_RUNWAY
+            
+        return info
         
     def format_position_info(self, info: PositionInfo) -> str:
         """Format the position information into a readable string."""
@@ -256,7 +214,7 @@ class PositionDetector:
                         if holding_point:
                             info.area = AircraftArea.AT_HOLDING_POINT
                             info.specific_location = holding_point.name
-                            info.runway = holding_point.runway
+                            info.runway = holding_point.associated_with
                             return info
                             
                     # 5. Check if on runway (most restrictive criteria)

@@ -3,9 +3,10 @@ from tkinter import filedialog
 from tkintermapview import TkinterMapView
 import json
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 import math
 import os
+from geo_utils import calculate_heading
 
 @dataclass
 class Runway:
@@ -345,9 +346,11 @@ class AirportVisualizer:
         # Calculate heading from threshold to other_threshold
         lat1, lon1 = threshold
         lat2, lon2 = other_threshold
-        dx = lon2 - lon1
-        dy = lat2 - lat1
-        angle = math.atan2(dx, dy)
+        heading = calculate_heading(lat1, lon1, lat2, lon2)
+        
+        # Convert heading to radians
+        angle = math.radians(heading)
+        
         # Box corners
         half_width = width / 2 / 111320  # meters to degrees approx
         # box_length is already in degrees (approx 30m)
