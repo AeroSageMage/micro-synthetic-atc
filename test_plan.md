@@ -1,7 +1,7 @@
 # Position Detector Test Plan
 
 ## Test Environment Setup
-- Airport: LIRF (Rome Fiumicino)
+- Airport: LOWG (Graz Airport)
 - Runway: 16C (17C in real world)
 - Taxiway: D
 - Test Data Source: Recorded UDP data from Aerofly FS 4
