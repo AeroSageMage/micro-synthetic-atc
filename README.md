@@ -5,6 +5,7 @@ This project provides a foundation for simulating virtual Air Traffic Control (A
 ## Features
 - **Position Detection**: Real-time detection of aircraft position on the airport (parking, taxiway, holding point, runway, in flight)
 - **GUI Visualization**: Live GUI to monitor aircraft ground state and debug position detection
+- **ATC Communication**: Basic proof-of-concept for ATC-pilot communication with state management
 - **Ground Handling Concepts**: Reference documentation and data structures for modeling ground operations
 - **Open for Community Expansion**: Designed for Aerofly users and the wider flight sim community to contribute and expand
 
@@ -24,9 +25,24 @@ This project provides a foundation for simulating virtual Air Traffic Control (A
 3. The GUI will display the current detected area, location, taxiway, runway, heading, and speed.
 4. Use the "Save Position" button to export the current state for debugging or sharing.
 ![screenshot of the position GUI open](screenshots/screenshot_position_gui_open_data_sender.png)
+
+### Running the ATC Communication
+1. Start the ATC state manager:
+   ```bash
+   python atc_state_manager.py
+   ```
+2. Start the radio display:
+   ```bash
+   python radio_display.py
+   ```
+3. Enter your callsign in the radio display
+4. Use the radio display to communicate with ATC following standard phraseology
+
 ## Project Structure
 - `position_detector.py` — Core logic for detecting aircraft ground state
 - `position_detector_gui.py` — Tkinter GUI for live visualization and debugging
+- `atc_state_manager.py` — Manages ATC states and communication flow
+- `radio_display.py` — Radio communication interface for pilot-ATC interaction
 - `ground_handling_concepts.md` — Reference guide for ground handling lifecycle, ATC clearances, and data structures
 
 ## Contributing
@@ -52,9 +68,15 @@ Open source — feel free to use, modify, and share.
   python airport_visualizer.py
   ```
 ![Screenshot of the map visualizing the JSON data and the threshold areas](screenshots/airport_area_visualizer.png)
+
 ### Current Status
 - **Proof of Concept:** Currently, the system works only for Graz Airport (Austria), specifically taxiway D to runway 17C.
 - The structure is ready for quick expansion: just add more airport data files and update references.
+- **ATC Communication:** Basic implementation of ATC-pilot communication with state management. Supports:
+  - Callsign management
+  - Basic ATC phraseology
+  - State transitions for ground operations
+  - Radio frequency management
 
 ---
 

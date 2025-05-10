@@ -240,3 +240,182 @@
 - Maintain current clearance until new instructions received
 - If no response from new controller, return to previous frequency
 - Report any issues or concerns during handoff 
+
+from enum import Enum
+from dataclasses import dataclass
+from typing import Optional, List, Dict, Set
+import threading
+import queue
+from datetime import datetime
+
+class ATCState(Enum):
+    GROUND = "GROUND"
+    TOWER = "TOWER"
+    DEPARTURE = "DEPARTURE"
+    APPROACH = "APPROACH"
+    CENTER = "CENTER"
+    WAITING = "WAITING"
+
+class AircraftStatus(Enum):
+    AT_GATE = "AT_GATE"
+    PUSHBACK = "PUSHBACK"
+    TAXIING = "TAXIING"
+    HOLDING_SHORT = "HOLDING_SHORT"
+    LINED_UP = "LINED_UP"
+    TAKEOFF = "TAKEOFF"
+    CLIMBING = "CLIMBING"
+    CRUISING = "CRUISING"
+    DESCENDING = "DESCENDING"
+    APPROACHING = "APPROACHING"
+    LANDING = "LANDING"
+    LANDED = "LANDED"
+
+@dataclass
+class ATCTransition:
+    from_state: ATCState
+    to_state: ATCState
+    required_status: Set[AircraftStatus]
+    trigger_message: str
+    expected_response: str
+    next_actions: List[str]
+
+class ATCStateManager:
+    def __init__(self, airport_manager):
+        self.airport_manager = airport_manager
+        self.current_state = ATCState.GROUND
+        self.aircraft_status = AircraftStatus.AT_GATE
+        self.transitions: Dict[str, ATCTransition] = {}
+        self.message_queue = queue.Queue()
+        self.state_lock = threading.Lock()
+        self._setup_transitions()
+        
+    def _setup_transitions(self):
+        # Define all possible state transitions with their required conditions
+        self.transitions = {
+            "GROUND_TO_TOWER": ATCTransition(
+                from_state=ATCState.GROUND,
+                to_state=ATCState.TOWER,
+                required_status={AircraftStatus.HOLDING_SHORT},
+                trigger_message="Delta 123, contact Tower 118.7",
+                expected_response="Contacting Tower 118.7, Delta 123",
+                next_actions=["Tower: Delta 123, hold short Runway 22L"]
+            ),
+            "TOWER_TO_DEPARTURE": ATCTransition(
+                from_state=ATCState.TOWER,
+                to_state=ATCState.DEPARTURE,
+                required_status={AircraftStatus.TAKEOFF, AircraftStatus.CLIMBING},
+                trigger_message="Delta 123, contact Departure 125.8",
+                expected_response="Contacting Departure 125.8, Delta 123",
+                next_actions=["Departure: Delta 123, climb and maintain 5,000"]
+            ),
+            # Add more transitions...
+        }
+    
+    def get_next_message(self) -> Optional[str]:
+        """Get the next message to send based on current state and aircraft status"""
+        with self.state_lock:
+            # Find applicable transitions
+            applicable_transitions = [
+                t for t in self.transitions.values()
+                if t.from_state == self.current_state and 
+                self.aircraft_status in t.required_status
+            ]
+            
+            if not applicable_transitions:
+                return None
+                
+            # For now, just use the first applicable transition
+            transition = applicable_transitions[0]
+            return transition.trigger_message
+    
+    def process_response(self, response: str) -> bool:
+        """Process a pilot response and update state if valid"""
+        with self.state_lock:
+            # Find applicable transitions
+            applicable_transitions = [
+                t for t in self.transitions.values()
+                if t.from_state == self.current_state and 
+                self.aircraft_status in t.required_status
+            ]
+            
+            if not applicable_transitions:
+                return False
+                
+            # Check if response matches expected
+            for transition in applicable_transitions:
+                if response.strip() == transition.expected_response:
+                    self.current_state = transition.to_state
+                    return True
+                    
+            return False
+    
+    def update_aircraft_status(self, new_status: AircraftStatus):
+        """Update the aircraft's current status"""
+        with self.state_lock:
+            self.aircraft_status = new_status
+
+class ATCController:
+    def __init__(self, airport_manager):
+        self.state_manager = ATCStateManager(airport_manager)
+        self.message_queue = queue.Queue()
+        self.running = False
+        self.controller_thread = None
+    
+    def start(self):
+        """Start the ATC controller thread"""
+        self.running = True
+        self.controller_thread = threading.Thread(target=self._controller_loop)
+        self.controller_thread.start()
+    
+    def _controller_loop(self):
+        """Main controller loop that processes messages and updates state"""
+        while self.running:
+            try:
+                # Check for next message to send
+                next_message = self.state_manager.get_next_message()
+                if next_message:
+                    self.message_queue.put(next_message)
+                
+                # Process any responses
+                try:
+                    response = self.message_queue.get(timeout=1.0)
+                    self.state_manager.process_response(response)
+                except queue.Empty:
+                    continue
+                    
+            except Exception as e:
+                print(f"Error in controller loop: {e}")
+    
+    def stop(self):
+        """Stop the ATC controller thread"""
+        self.running = False
+        if self.controller_thread:
+            self.controller_thread.join()
+
+# Initialize
+airport_manager = AirportManager("airport_layout.json")
+atc_controller = ATCController(airport_manager)
+
+# Start the controller
+atc_controller.start()
+
+# Update aircraft status (e.g., from position detector)
+atc_controller.state_manager.update_aircraft_status(AircraftStatus.HOLDING_SHORT)
+
+# Get next message to send
+next_message = atc_controller.state_manager.get_next_message()
+if next_message:
+    print(f"ATC: {next_message}")
+
+# Process pilot response
+response = "Contacting Tower 118.7, Delta 123"
+if atc_controller.state_manager.process_response(response):
+    print("State transition successful")
+
+# Ground Phase:
+# ATC: "Delta 123, taxi to Runway 22L via Alpha, Bravo"
+# Pilot: "Taxi to Runway 22L via Alpha, Bravo, Delta 123"
+# [Aircraft moves to HOLDING_SHORT]
+# ATC: "Delta 123, contact Tower 118.7"
+# Pilot: "Contacting Tower 118.7, Delta 123"
+# [State changes to TOWER] 

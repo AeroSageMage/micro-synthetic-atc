@@ -1,6 +1,33 @@
 {
     "name": "LOWG Airport",
     "icao": "LOWG",
+    "radio_frequencies": {
+        "ground": {
+            "name": "Ground",
+            "frequency": "121.700",
+            "description": "Graz Ground"
+        },
+        "tower": {
+            "name": "Tower",
+            "frequency": "118.100",
+            "description": "Graz Tower"
+        },
+        "departure": {
+            "name": "Departure",
+            "frequency": "124.200",
+            "description": "Graz Departure"
+        },
+        "approach": {
+            "name": "Approach",
+            "frequency": "124.200",
+            "description": "Graz Approach"
+        },
+        "center": {
+            "name": "Center",
+            "frequency": "133.800",
+            "description": "Vienna Center"
+        }
+    },
     "runways": [
         {
             "name": "16C/34C",
