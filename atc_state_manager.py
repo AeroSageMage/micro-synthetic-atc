@@ -10,6 +10,21 @@ import time
 import signal
 import sys
 
+@dataclass
+class AircraftInfo:
+    """Class to store aircraft information"""
+    callsign: str
+    type: str  # ICAO code
+    name: str  # Full name
+    cruise_speed: int  # in knots
+    approach_speed: int  # in knots
+    cruise_altitude: int  # in feet
+    max_range: int  # in nautical miles
+    tags: List[str]
+    has_radio_nav: bool = True
+    runway_takeoff: Optional[int] = None
+    runway_landing: Optional[int] = None
+
 class ResponseType(Enum):
     READBACK = "READBACK"  # Simple readback of instructions
     ACKNOWLEDGE = "ACKNOWLEDGE"  # Wilco/roger acknowledgment
@@ -139,6 +154,9 @@ class ATCStateManager:
         self.message_queue = queue.Queue()
         self.state_lock = threading.Lock()
         self.callsign = "aabbcc"  # Default callsign
+        
+        # Initialize aircraft info
+        self.aircraft_info = None
         
         # Initialize message sender
         self.message_sender = ATCMessageSender()
@@ -288,6 +306,18 @@ class ATCStateManager:
             ),
         }
     
+    def set_aircraft(self, aircraft_info: AircraftInfo):
+        """Set the current aircraft information"""
+        with self.state_lock:
+            self.aircraft_info = aircraft_info
+            self.callsign = aircraft_info.callsign
+            # Rebuild transitions with new callsign
+            self._setup_transitions()
+
+    def get_aircraft_info(self) -> Optional[AircraftInfo]:
+        """Get the current aircraft information"""
+        return self.aircraft_info
+
     def get_expected_response(self) -> Optional[ExpectedResponse]:
         """Get the expected response type for the current state"""
         with self.state_lock:

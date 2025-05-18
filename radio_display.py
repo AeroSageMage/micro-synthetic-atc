@@ -6,7 +6,9 @@ import threading
 import time
 import socket
 import json
-from atc_state_manager import ATCStateManager, ATCState, AircraftStatus
+from atc_state_manager import ATCStateManager, ATCState, AircraftStatus, AircraftInfo
+from aircraft_data import aircraft_data, AircraftType
+from typing import Dict, List
 
 class RadioDisplay:
     def __init__(self, root, atc_state_manager: ATCStateManager):
@@ -18,7 +20,7 @@ class RadioDisplay:
         self.active_freq = float(atc_state_manager.get_current_frequency().frequency)
         self.standby_freq = 121.500  # Default standby frequency
         
-        # Initialize aircraft info with default callsign
+        # Initialize aircraft info
         self.aircraft_info = {
             'callsign': atc_state_manager.callsign,
             'type': '',
@@ -35,6 +37,9 @@ class RadioDisplay:
         # Create main frame
         self.main_frame = ttk.Frame(root, padding="10")
         self.main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # Create aircraft selection section
+        self.create_aircraft_selection()
         
         # Create frequency displays and swap button
         self.create_frequency_and_swap()
@@ -62,29 +67,98 @@ class RadioDisplay:
         # Start update thread
         self.start_reception()
 
+    def create_aircraft_selection(self):
+        """Create the aircraft selection section"""
+        selection_frame = ttk.LabelFrame(self.main_frame, text="Aircraft Selection", padding="5")
+        selection_frame.grid(row=0, column=0, columnspan=3, padx=5, pady=5, sticky=(tk.W, tk.E))
+        
+        # Create aircraft type selection
+        ttk.Label(selection_frame, text="Aircraft Type:").grid(row=0, column=0, padx=5, pady=2, sticky=tk.W)
+        self.aircraft_type_var = tk.StringVar()
+        self.aircraft_type_combo = ttk.Combobox(selection_frame, textvariable=self.aircraft_type_var, width=30)
+        self.aircraft_type_combo.grid(row=0, column=1, padx=5, pady=2, sticky=tk.W)
+        
+        # Populate aircraft types
+        self.aircraft_types = aircraft_data.get_all_aircraft_types()
+        self.aircraft_type_combo['values'] = [f"{a.name_full} ({a.icao_code})" for a in self.aircraft_types]
+        self.aircraft_type_combo.bind('<<ComboboxSelected>>', self.on_aircraft_selected)
+        
+        # Create callsign entry
+        ttk.Label(selection_frame, text="Callsign:").grid(row=1, column=0, padx=5, pady=2, sticky=tk.W)
+        self.callsign_entry = ttk.Entry(selection_frame, width=20)
+        self.callsign_entry.grid(row=1, column=1, padx=5, pady=2, sticky=tk.W)
+        self.callsign_entry.insert(0, self.aircraft_info['callsign'])
+        self.callsign_entry.bind('<Return>', self.on_callsign_changed)
+        
+        # Create apply button
+        apply_button = ttk.Button(selection_frame, text="Apply", command=self.apply_aircraft_selection)
+        apply_button.grid(row=1, column=2, padx=5, pady=2)
+
+    def on_aircraft_selected(self, event):
+        """Handle aircraft type selection"""
+        selected = self.aircraft_type_var.get()
+        if selected:
+            # Extract aircraft type from selection
+            aircraft_type = selected.split('(')[1].strip(')')
+            # Find matching aircraft info
+            self.selected_aircraft = aircraft_data.get_aircraft_type(aircraft_type)
+
+    def on_callsign_changed(self, event):
+        """Handle callsign change"""
+        self.apply_aircraft_selection()
+
+    def apply_aircraft_selection(self):
+        """Apply the selected aircraft and callsign"""
+        if hasattr(self, 'selected_aircraft'):
+            callsign = self.callsign_entry.get().strip()
+            if not callsign:
+                callsign = self.aircraft_info['callsign']
+            
+            # Create AircraftInfo object
+            aircraft_info = AircraftInfo(
+                callsign=callsign,
+                type=self.selected_aircraft.icao_code,
+                name=self.selected_aircraft.name_full,
+                cruise_speed=self.selected_aircraft.cruise_speed_kts,
+                approach_speed=self.selected_aircraft.approach_airspeed_kts,
+                cruise_altitude=self.selected_aircraft.cruise_altitude_ft,
+                max_range=self.selected_aircraft.maximum_range_nm,
+                tags=self.selected_aircraft.tags,
+                has_radio_nav=self.selected_aircraft.has_radio_nav,
+                runway_takeoff=self.selected_aircraft.runway_takeoff,
+                runway_landing=self.selected_aircraft.runway_landing
+            )
+            
+            # Update ATC state manager
+            self.atc_state_manager.set_aircraft(aircraft_info)
+            
+            # Update aircraft info display
+            self.update_aircraft_info('type', f"{aircraft_info.type} ({aircraft_info.name})")
+            self.update_aircraft_info('callsign', aircraft_info.callsign)
+
     def create_frequency_and_swap(self):
         # Active frequency display
         active_frame = ttk.LabelFrame(self.main_frame, text="ACTIVE", padding="5")
-        active_frame.grid(row=0, column=0, padx=5, pady=5, sticky=(tk.W, tk.E))
+        active_frame.grid(row=1, column=0, padx=5, pady=5, sticky=(tk.W, tk.E))
         self.active_label = ttk.Label(active_frame, text=f"{self.active_freq:.3f}", font=('Arial', 14))
         self.active_label.grid(row=0, column=0, padx=5, pady=5)
         
         # Swap button (centered vertically between the two displays)
         swap_frame = ttk.Frame(self.main_frame)
-        swap_frame.grid(row=0, column=1, padx=5, pady=5, sticky=(tk.N, tk.S))
+        swap_frame.grid(row=1, column=1, padx=5, pady=5, sticky=(tk.N, tk.S))
         swap_btn = ttk.Button(swap_frame, text="SWAP", command=self.swap_frequencies)
         swap_btn.grid(row=0, column=0, padx=5, pady=20)
         
         # Standby frequency display
         standby_frame = ttk.LabelFrame(self.main_frame, text="STBY", padding="5")
-        standby_frame.grid(row=0, column=2, padx=5, pady=5, sticky=(tk.W, tk.E))
+        standby_frame.grid(row=1, column=2, padx=5, pady=5, sticky=(tk.W, tk.E))
         self.standby_label = ttk.Label(standby_frame, text=f"{self.standby_freq:.3f}", font=('Arial', 14))
         self.standby_label.grid(row=0, column=0, padx=5, pady=5)
         
     def create_standby_control_buttons(self):
         # Only standby frequency can be adjusted
         standby_controls = ttk.Frame(self.main_frame)
-        standby_controls.grid(row=1, column=2, pady=5)
+        standby_controls.grid(row=2, column=2, pady=5)
         
         # Coarse adjustment buttons
         ttk.Button(standby_controls, text="Coarse ↑", command=lambda: self.adjust_frequency('standby', 'coarse', 1)).grid(row=0, column=0, padx=2)
@@ -112,7 +186,7 @@ class RadioDisplay:
     def create_aircraft_info_section(self):
         # Create a frame for aircraft information
         aircraft_frame = ttk.LabelFrame(self.main_frame, text="Aircraft Information", padding="5")
-        aircraft_frame.grid(row=2, column=0, columnspan=3, padx=5, pady=5, sticky=(tk.W, tk.E))
+        aircraft_frame.grid(row=3, column=0, columnspan=3, padx=5, pady=5, sticky=(tk.W, tk.E))
         
         # Create labels and entry fields for each aircraft info
         self.aircraft_labels = {}
@@ -170,7 +244,7 @@ class RadioDisplay:
     def create_atc_message_display(self):
         """Create the ATC message display area"""
         message_frame = ttk.LabelFrame(self.main_frame, text="ATC Messages", padding="5")
-        message_frame.grid(row=3, column=0, columnspan=3, padx=5, pady=5, sticky=(tk.W, tk.E))
+        message_frame.grid(row=4, column=0, columnspan=3, padx=5, pady=5, sticky=(tk.W, tk.E))
         
         # Create text widget for messages
         self.message_text = tk.Text(message_frame, height=4, width=50, wrap=tk.WORD)
@@ -180,7 +254,7 @@ class RadioDisplay:
     def create_pilot_message_input(self):
         """Create the pilot message input area"""
         input_frame = ttk.LabelFrame(self.main_frame, text="Pilot Message", padding="5")
-        input_frame.grid(row=4, column=0, columnspan=3, padx=5, pady=5, sticky=(tk.W, tk.E))
+        input_frame.grid(row=5, column=0, columnspan=3, padx=5, pady=5, sticky=(tk.W, tk.E))
         
         # Create message entry
         self.message_entry = ttk.Entry(input_frame, width=50)
@@ -403,7 +477,7 @@ class RadioDisplay:
     def create_control_buttons(self):
         """Create control buttons for the radio display"""
         control_frame = ttk.Frame(self.main_frame)
-        control_frame.grid(row=5, column=0, columnspan=3, pady=5)
+        control_frame.grid(row=6, column=0, columnspan=3, pady=5)
         
         # Create start/stop button
         self.start_button = ttk.Button(control_frame, text="Start Receiving", command=self.toggle_reception)
