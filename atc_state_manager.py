@@ -10,6 +10,20 @@ import time
 import signal
 import sys
 
+class ResponseType(Enum):
+    READBACK = "READBACK"  # Simple readback of instructions
+    ACKNOWLEDGE = "ACKNOWLEDGE"  # Wilco/roger acknowledgment
+    READY_REPORT = "READY_REPORT"  # Report when ready
+    NO_RESPONSE = "NO_RESPONSE"  # No response expected
+
+@dataclass
+class ExpectedResponse:
+    type: ResponseType
+    requires_readback: bool
+    requires_acknowledgment: bool
+    requires_ready_report: bool
+    action: str  # The action to report ready for
+
 class ATCState(Enum):
     GROUND = "GROUND"
     TOWER = "TOWER"
@@ -80,23 +94,35 @@ class ATCTransition:
     trigger_message: str
     expected_response: str
     next_actions: List[str]
+    response_type: ResponseType
+    action: str  # The action to report ready for
 
 class ATCMessageSender:
     """Handles sending ATC messages to the radio display"""
     def __init__(self, port: int = 49003):
         self.port = port
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.radio_display = None  # Reference to RadioDisplay instance
+        
+    def set_radio_display(self, radio_display):
+        """Set the radio display instance for direct message display"""
+        self.radio_display = radio_display
         
     def send_message(self, message: str, state: ATCState, frequency: str):
         """Send a message to the radio display"""
         try:
-            data = {
-                'timestamp': time.strftime('%H:%M:%S'),
-                'message': message,
-                'state': state.value,
-                'frequency': frequency
-            }
-            self.socket.sendto(json.dumps(data).encode('utf-8'), ('127.0.0.1', self.port))
+            # If we have a direct reference to the radio display, use it
+            if self.radio_display:
+                self.radio_display.display_atc_message(message)
+            else:
+                # Fall back to UDP for backward compatibility
+                data = {
+                    'timestamp': time.strftime('%H:%M:%S'),
+                    'message': message,
+                    'state': state.value,
+                    'frequency': frequency
+                }
+                self.socket.sendto(json.dumps(data).encode('utf-8'), ('127.0.0.1', self.port))
         except Exception as e:
             print(f"Error sending ATC message: {e}")
             
@@ -119,7 +145,6 @@ class ATCStateManager:
         
         # Load airport data and initialize frequencies
         with open(airport_manager.layout_file, 'r') as f:
-            import json
             airport_data = json.load(f)
         self.radio_frequencies = RadioFrequencies(airport_data)
         
@@ -143,7 +168,9 @@ class ATCStateManager:
                 required_status={AircraftStatus.AT_GATE},
                 trigger_message=f"Ground: {self.callsign}, request pushback",
                 expected_response=f"Requesting pushback, {self.callsign}",
-                next_actions=[f"Ground: {self.callsign}, pushback approved, face east"]
+                next_actions=[f"Ground: {self.callsign}, pushback approved, face east"],
+                response_type=ResponseType.READBACK,
+                action="pushback"
             ),
             "PUSHBACK_APPROVED": ATCTransition(
                 from_state=ATCState.GROUND,
@@ -151,7 +178,9 @@ class ATCStateManager:
                 required_status={AircraftStatus.PUSHBACK},
                 trigger_message=f"Ground: {self.callsign}, pushback approved, face east",
                 expected_response=f"Pushback approved, face east, {self.callsign}",
-                next_actions=[f"Ground: {self.callsign}, report when ready to taxi"]
+                next_actions=[f"Ground: {self.callsign}, report when ready to taxi"],
+                response_type=ResponseType.READBACK,
+                action="pushback"
             ),
             "READY_TO_TAXI": ATCTransition(
                 from_state=ATCState.GROUND,
@@ -159,7 +188,9 @@ class ATCStateManager:
                 required_status={AircraftStatus.PUSHBACK},
                 trigger_message=f"Ground: {self.callsign}, report when ready to taxi",
                 expected_response=f"Ready to taxi, {self.callsign}",
-                next_actions=[f"Ground: {self.callsign}, taxi to Runway 16C via Alpha, Bravo"]
+                next_actions=[f"Ground: {self.callsign}, taxi to Runway 16C via Alpha, Bravo"],
+                response_type=ResponseType.READY_REPORT,
+                action="taxi"
             ),
             "TAXI_CLEARANCE": ATCTransition(
                 from_state=ATCState.GROUND,
@@ -167,7 +198,9 @@ class ATCStateManager:
                 required_status={AircraftStatus.PUSHBACK, AircraftStatus.TAXIING},
                 trigger_message=f"Ground: {self.callsign}, taxi to Runway 16C via Alpha, Bravo",
                 expected_response=f"Taxi to Runway 16C via Alpha, Bravo, {self.callsign}",
-                next_actions=[f"Ground: {self.callsign}, hold short Runway 16C"]
+                next_actions=[f"Ground: {self.callsign}, hold short Runway 16C"],
+                response_type=ResponseType.READBACK,
+                action="taxi"
             ),
             "HOLD_SHORT": ATCTransition(
                 from_state=ATCState.GROUND,
@@ -175,7 +208,9 @@ class ATCStateManager:
                 required_status={AircraftStatus.TAXIING},
                 trigger_message=f"Ground: {self.callsign}, hold short Runway 16C",
                 expected_response=f"Hold short Runway 16C, {self.callsign}",
-                next_actions=[f"Ground: {self.callsign}, contact {tower_name} {tower_freq}"]
+                next_actions=[f"Ground: {self.callsign}, contact {tower_name} {tower_freq}"],
+                response_type=ResponseType.READBACK,
+                action="hold short"
             ),
             "CROSS_RUNWAY": ATCTransition(
                 from_state=ATCState.GROUND,
@@ -183,7 +218,9 @@ class ATCStateManager:
                 required_status={AircraftStatus.TAXIING},
                 trigger_message=f"Ground: {self.callsign}, cross Runway 16C",
                 expected_response=f"Cross Runway 16C, {self.callsign}",
-                next_actions=[f"Ground: {self.callsign}, continue taxi via Bravo"]
+                next_actions=[f"Ground: {self.callsign}, continue taxi via Bravo"],
+                response_type=ResponseType.READBACK,
+                action="cross runway"
             ),
             "CONTINUE_TAXI": ATCTransition(
                 from_state=ATCState.GROUND,
@@ -191,7 +228,9 @@ class ATCStateManager:
                 required_status={AircraftStatus.TAXIING},
                 trigger_message=f"Ground: {self.callsign}, continue taxi via Bravo",
                 expected_response=f"Continue taxi via Bravo, {self.callsign}",
-                next_actions=[f"Ground: {self.callsign}, hold short Runway 16C"]
+                next_actions=[f"Ground: {self.callsign}, hold short Runway 16C"],
+                response_type=ResponseType.READBACK,
+                action="taxi"
             ),
             
             # Ground to Tower Handoff
@@ -201,7 +240,9 @@ class ATCStateManager:
                 required_status={AircraftStatus.HOLDING_SHORT},
                 trigger_message=f"Ground: {self.callsign}, contact {tower_name} {tower_freq}",
                 expected_response=f"Contacting {tower_name} {tower_freq}, {self.callsign}",
-                next_actions=[f"{tower_name}: {self.callsign}, hold short Runway 16C"]
+                next_actions=[f"{tower_name}: {self.callsign}, hold short Runway 16C"],
+                response_type=ResponseType.READBACK,
+                action="contact tower"
             ),
             
             # Tower Phase
@@ -211,7 +252,9 @@ class ATCStateManager:
                 required_status={AircraftStatus.HOLDING_SHORT},
                 trigger_message=f"{tower_name}: {self.callsign}, hold short Runway 16C",
                 expected_response=f"Hold short Runway 16C, {self.callsign}",
-                next_actions=[f"{tower_name}: {self.callsign}, line up and wait Runway 16C"]
+                next_actions=[f"{tower_name}: {self.callsign}, line up and wait Runway 16C"],
+                response_type=ResponseType.READBACK,
+                action="hold short"
             ),
             "TOWER_LINE_UP": ATCTransition(
                 from_state=ATCState.TOWER,
@@ -219,7 +262,9 @@ class ATCStateManager:
                 required_status={AircraftStatus.HOLDING_SHORT},
                 trigger_message=f"{tower_name}: {self.callsign}, line up and wait Runway 16C",
                 expected_response=f"Line up and wait Runway 16C, {self.callsign}",
-                next_actions=[f"{tower_name}: {self.callsign}, cleared for takeoff Runway 16C"]
+                next_actions=[f"{tower_name}: {self.callsign}, cleared for takeoff Runway 16C"],
+                response_type=ResponseType.READBACK,
+                action="line up"
             ),
             "TOWER_TAKEOFF": ATCTransition(
                 from_state=ATCState.TOWER,
@@ -227,7 +272,9 @@ class ATCStateManager:
                 required_status={AircraftStatus.LINED_UP},
                 trigger_message=f"{tower_name}: {self.callsign}, cleared for takeoff Runway 16C",
                 expected_response=f"Cleared for takeoff Runway 16C, {self.callsign}",
-                next_actions=[f"{tower_name}: {self.callsign}, contact Departure {departure_freq}"]
+                next_actions=[f"{tower_name}: {self.callsign}, contact Departure {departure_freq}"],
+                response_type=ResponseType.READBACK,
+                action="takeoff"
             ),
             "TOWER_TO_DEPARTURE": ATCTransition(
                 from_state=ATCState.TOWER,
@@ -235,9 +282,35 @@ class ATCStateManager:
                 required_status={AircraftStatus.TAKEOFF, AircraftStatus.CLIMBING},
                 trigger_message=f"{tower_name}: {self.callsign}, contact Departure {departure_freq}",
                 expected_response=f"Contacting Departure {departure_freq}, {self.callsign}",
-                next_actions=[f"Departure: {self.callsign}, climb and maintain 5,000"]
+                next_actions=[f"Departure: {self.callsign}, climb and maintain 5,000"],
+                response_type=ResponseType.READBACK,
+                action="climb"
             ),
         }
+    
+    def get_expected_response(self) -> Optional[ExpectedResponse]:
+        """Get the expected response type for the current state"""
+        with self.state_lock:
+            # Find applicable transitions
+            applicable_transitions = [
+                t for t in self.transitions.values()
+                if t.from_state == self.current_state and 
+                self.aircraft_status in t.required_status
+            ]
+            
+            if not applicable_transitions:
+                return None
+                
+            # For now, just use the first applicable transition
+            transition = applicable_transitions[0]
+            
+            return ExpectedResponse(
+                type=transition.response_type,
+                requires_readback=transition.response_type == ResponseType.READBACK,
+                requires_acknowledgment=transition.response_type == ResponseType.ACKNOWLEDGE,
+                requires_ready_report=transition.response_type == ResponseType.READY_REPORT,
+                action=transition.action
+            )
     
     def get_next_message(self) -> Optional[str]:
         """Get the next message to send based on current state and aircraft status"""
