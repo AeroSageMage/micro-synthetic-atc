@@ -37,7 +37,7 @@ def reload_atc_system():
     airport_manager = AirportManager("./airport_data/lowg_airport.json")
     
     # Create new ATC controller
-    atc_controller = ATCController(airport_manager)
+    atc_controller = ATCController(airport_manager, debug=False)
     
     # Restore state
     atc_controller.state_manager.current_state = current_state
@@ -50,7 +50,7 @@ def reload_atc_system():
     atc_controller.state_manager.message_sender.set_radio_display(radio_display)
     
     # Recreate position detector
-    position_detector = PositionDetector(airport_manager, atc_controller.state_manager)
+    position_detector = PositionDetector(airport_manager, atc_controller.state_manager, debug=False)
     atc_controller.state_manager.set_position_detector(position_detector)
     
     # Restart UDP receiver
@@ -90,7 +90,7 @@ def main():
         airport_manager = AirportManager("./airport_data/lowg_airport.json")
         
         # Create ATC controller
-        atc_controller = ATCController(airport_manager)
+        atc_controller = ATCController(airport_manager, debug=False)
         
         # Create root window
         root = tk.Tk()
@@ -109,7 +109,7 @@ def main():
         atc_controller.state_manager.message_sender.set_radio_display(radio_display)
         
         # Create position detector and connect it to ATC state manager
-        position_detector = PositionDetector(airport_manager, atc_controller.state_manager)
+        position_detector = PositionDetector(airport_manager, atc_controller.state_manager, debug=False)
         atc_controller.state_manager.set_position_detector(position_detector)
         
         # Print initial state
@@ -118,13 +118,27 @@ def main():
         print(f"Initial frequency: {atc_controller.state_manager.get_current_frequency().frequency} MHz")
         print("\nATC system is running. Press Ctrl+C to stop.")
         
-        # Start UDP receiver first
+        # Start UDP receiver with position callback
         position_detector.udp_receiver.start_receiving()
+        print(f"🔧 UDP receiver started")
         
-        # Start position detection in a separate thread
-        position_detector_thread = threading.Thread(target=position_detector.run)
-        position_detector_thread.daemon = True
-        position_detector_thread.start()
+        # Set up position callback to call ATC state manager directly
+        def position_callback(position, heading):
+            """Callback function called when new position data is received"""
+            # Debug: Check if debug attribute exists
+            if hasattr(atc_controller.state_manager, 'debug'):
+                if atc_controller.state_manager.debug:
+                    print(f"📍 Position callback: {position}, heading: {heading}")
+            else:
+                print(f"⚠️  WARNING: ATCStateManager has no debug attribute!")
+            atc_controller.state_manager.update_position(position, heading)
+        
+        position_detector.udp_receiver.set_position_callback(position_callback)
+        print(f"🔧 Position callback set up")
+        
+        # Debug: Check ATCStateManager attributes
+        print(f"🔍 ATCStateManager attributes: {dir(atc_controller.state_manager)}")
+        print(f"🔍 ATCStateManager has debug: {hasattr(atc_controller.state_manager, 'debug')}")
         
         # Run the UI
         root.mainloop()

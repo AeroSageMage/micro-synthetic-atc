@@ -81,6 +81,7 @@ class UDPReceiver:
         self.log_to_csv: bool = False
         self.armed_for_recording: bool = False
         self.csv_files = {}
+        self.position_callback: Optional[callable] = None  # Callback for position updates
 
 
     def start_receiving(self) -> None:
@@ -101,10 +102,16 @@ class UDPReceiver:
                 data, _ = self.socket.recvfrom(1024)
                 self.last_receive_time = time.time()
                 message = data.decode('utf-8')
+                
+                # Track if we received new position data
+                new_position_data = False
+                
                 if message.startswith('XGPS'):
                     self.latest_gps_data = self._parse_gps_data(message)
+                    new_position_data = True
                 if message.startswith('XATT'):
                     self.latest_attitude_data = self._parse_attitude_data(message)
+                    new_position_data = True
                 if message.startswith('XAIRCRAFT'):
                     self.latest_aircraft_data = self._parse_aircraft_data(message)
                 if message.startswith('XTRAFFIC'):
@@ -112,6 +119,15 @@ class UDPReceiver:
                     if traffic_data:
                         # Store with current timestamp
                         self.traffic_data[traffic_data.icao_address] = (traffic_data, time.time())
+                
+                # Call position callback if we have new position data and both GPS and attitude are available
+                if new_position_data and self.position_callback and self.latest_gps_data and self.latest_attitude_data:
+                    try:
+                        position = (self.latest_gps_data.latitude, self.latest_gps_data.longitude)
+                        heading = self.latest_attitude_data.true_heading
+                        self.position_callback(position, heading)
+                    except Exception as e:
+                        print(f"Error in position callback: {e}")
                         
                 # Check if we need to start logging after arming
                 if self.armed_for_recording and (self.latest_gps_data or len(self.traffic_data) > 0):
@@ -274,6 +290,10 @@ class UDPReceiver:
         if self.csv_files:
             for file in self.csv_files.values():
                 file.close()
+
+    def set_position_callback(self, callback: callable):
+        """Set a callback function to be called when new position data is received"""
+        self.position_callback = callback
 
 class AircraftTrackerApp:
     """

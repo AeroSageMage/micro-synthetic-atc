@@ -223,6 +223,31 @@ class RadioDisplay:
             self.aircraft_entries[field].insert(0, self.aircraft_info[field])
             row += 1
             
+        # Add another separator
+        ttk.Separator(aircraft_frame, orient='horizontal').grid(row=row, column=0, columnspan=2, sticky='ew', pady=5)
+        row += 1
+        
+        # Third row: ATC status fields
+        ttk.Label(aircraft_frame, text="ATC State:").grid(row=row, column=0, padx=5, pady=2, sticky=tk.W)
+        self.state_label = ttk.Label(aircraft_frame, text="GROUND", font=('Arial', 10, 'bold'))
+        self.state_label.grid(row=row, column=1, padx=5, pady=2, sticky=tk.W)
+        row += 1
+        
+        ttk.Label(aircraft_frame, text="Aircraft Status:").grid(row=row, column=0, padx=5, pady=2, sticky=tk.W)
+        self.status_label = ttk.Label(aircraft_frame, text="AT_GATE", font=('Arial', 10, 'bold'))
+        self.status_label.grid(row=row, column=1, padx=5, pady=2, sticky=tk.W)
+        row += 1
+        
+        # Add position detector status
+        ttk.Label(aircraft_frame, text="Detected Area:").grid(row=row, column=0, padx=5, pady=2, sticky=tk.W)
+        self.area_label = ttk.Label(aircraft_frame, text="NOT_DETECTED", font=('Arial', 10, 'bold'))
+        self.area_label.grid(row=row, column=1, padx=5, pady=2, sticky=tk.W)
+        row += 1
+        
+        ttk.Label(aircraft_frame, text="Location:").grid(row=row, column=0, padx=5, pady=2, sticky=tk.W)
+        self.location_label = ttk.Label(aircraft_frame, text="", font=('Arial', 10))
+        self.location_label.grid(row=row, column=1, padx=5, pady=2, sticky=tk.W)
+            
     def update_aircraft_info(self, field, value):
         """Update a specific aircraft information field"""
         if field in self.aircraft_entries:
@@ -453,6 +478,26 @@ class RadioDisplay:
                 print("Updating callsign...")
                 self.update_aircraft_info('callsign', self.atc_state_manager.callsign)
             
+            # Update status display
+            self.state_label.config(text=f"State: {self.atc_state_manager.current_state.value}")
+            self.status_label.config(text=f"Status: {self.atc_state_manager.aircraft_status.value}")
+            
+            # Update position detector status if available
+            if hasattr(self.atc_state_manager, 'position_detector') and self.atc_state_manager.position_detector:
+                # Only show cached information, don't call detect_position from UI thread
+                if hasattr(self.atc_state_manager, 'current_position') and self.atc_state_manager.current_position:
+                    position = self.atc_state_manager.current_position
+                    # Don't call detect_position here - it causes beachball!
+                    # Just show the position coordinates
+                    self.area_label.config(text=f"Position: {position[0]:.4f}, {position[1]:.4f}")
+                    self.location_label.config(text=f"Status: {self.atc_state_manager.aircraft_status.value}")
+                else:
+                    self.area_label.config(text="Area: NO_POSITION")
+                    self.location_label.config(text="")
+            else:
+                self.area_label.config(text="Area: NO_DETECTOR")
+                self.location_label.config(text="")
+            
             # Enable/disable buttons based on state
             print("Updating button states...")
             if expected_response:
@@ -475,7 +520,7 @@ class RadioDisplay:
     def start_reception(self):
         """Start receiving UDP data"""
         self.running = True
-        self.start_button.config(text="Stop Receiving")
+        self.reception_button.config(text="Stop Reception")
         
         # Start update thread
         self.update_thread = threading.Thread(target=self.update_aircraft_info_loop)
@@ -485,7 +530,7 @@ class RadioDisplay:
     def stop_reception(self):
         """Stop receiving UDP data"""
         self.running = False
-        self.start_button.config(text="Start Receiving")
+        self.reception_button.config(text="Start Reception")
         
     def update_aircraft_info_loop(self):
         """Continuously update aircraft information"""
@@ -528,11 +573,11 @@ class RadioDisplay:
     def create_control_buttons(self):
         """Create control buttons for the radio display"""
         control_frame = ttk.Frame(self.main_frame)
-        control_frame.grid(row=6, column=0, columnspan=3, pady=5)
+        control_frame.grid(row=6, column=0, columnspan=3, padx=5, pady=5)
         
-        # Create start/stop button
-        self.start_button = ttk.Button(control_frame, text="Start Receiving", command=self.toggle_reception)
-        self.start_button.pack(side=tk.LEFT, padx=5)
+        # Create control buttons
+        self.reception_button = ttk.Button(control_frame, text="Stop Reception", command=self.toggle_reception)
+        self.reception_button.pack(side=tk.LEFT, padx=5)
         
     def toggle_reception(self):
         """Toggle the reception state"""
@@ -546,7 +591,7 @@ if __name__ == "__main__":
     
     # Initialize ATC state manager
     airport_manager = AirportManager("airport_layout.json")
-    atc_state_manager = ATCStateManager(airport_manager)
+    atc_state_manager = ATCStateManager(airport_manager, debug=False)
     
     # Create and run the UI
     root = tk.Tk()

@@ -160,8 +160,9 @@ class ATCMessageSender:
         self.socket.close()
 
 class ATCStateManager:
-    def __init__(self, airport_manager):
+    def __init__(self, airport_manager, debug: bool = False):
         self.airport_manager = airport_manager
+        self.debug = debug  # Add the missing debug attribute assignment
         self.current_state = ATCState.GROUND
         self.aircraft_status = AircraftStatus.AT_GATE
         self.transitions: Dict[str, ATCTransition] = {}
@@ -192,53 +193,81 @@ class ATCStateManager:
         self.position_detector = position_detector
 
     def update_position(self, position: Tuple[float, float], heading: float):
-        """Update the current aircraft position and heading"""
-        # Quick update of position data with minimal lock time
-        print(f"[LOCK] update_position requesting state_lock...")
+        """Update the aircraft's current position and heading"""
+        if self.debug:
+            print(f"🔄 Position update called: {position}, heading: {heading}")
+        
         with self.state_lock:
-            print(f"[LOCK] update_position acquired state_lock")
-            print(f"\n=== Position Update ===")
-            print(f"New position: {position[0]:.6f}, {position[1]:.6f}")
-            print(f"New heading: {heading:.1f}°")
-            print(f"Previous position: {self.current_position}")
-            
-            # Check if this is the first position update
-            first_position = self.current_position is None
-            
+            if self.debug:
+                print(f"[LOCK] update_position acquiring state_lock")
             self.current_position = position
             self.current_heading = heading
             
+            # Check if this is the first position update
+            first_position = not hasattr(self, '_position_initialized')
+            if first_position:
+                self._position_initialized = True
+                if self.debug:
+                    print("First position update - initializing system")
+            
+            if self.debug:
+                print(f"=== Position Update ===")
+                print(f"Position: {position}")
+                print(f"Heading: {heading}")
+                print(f"First position: {first_position}")
+            
             # Quick status update based on position detector
             if self.position_detector:
+                if self.debug:
+                    print(f"Position detector available, calling detect_position...")
                 info = self.position_detector.detect_position(position, heading)
-                print(f"Position detector result: {info.area.value}")
+                if self.debug:
+                    print(f"Position detector result: {info.area.value}")
+                    print(f"DEBUG: Aircraft area detected: {info.area.value}")
+                    print(f"DEBUG: Current aircraft status: {self.aircraft_status.value}")
+                    print(f"DEBUG: Position detector info - area: {info.area.value}, specific_location: {info.specific_location}, taxiway: {info.taxiway}, runway: {info.runway}")
                 
                 if info.area == AircraftArea.AT_PARKING:
                     self.aircraft_status = AircraftStatus.AT_GATE
-                    print(f"Status updated to: {self.aircraft_status.value}")
+                    if self.debug:
+                        print(f"Status updated to: {self.aircraft_status.value}")
                 elif info.area == AircraftArea.ON_TAXIWAY:
                     self.aircraft_status = AircraftStatus.TAXIING
-                    print(f"Status updated to: {self.aircraft_status.value}")
+                    if self.debug:
+                        print(f"Status updated to: {self.aircraft_status.value}")
                 elif info.area == AircraftArea.AT_HOLDING_POINT:
+                    if self.debug:
+                        print(f"🛫 STATE MACHINE: Detected holding point!")
+                        print(f"🛫 STATE MACHINE: Previous status: {self.aircraft_status.value}")
                     self.aircraft_status = AircraftStatus.HOLDING_SHORT
-                    print(f"Status updated to: {self.aircraft_status.value}")
+                    if self.debug:
+                        print(f"🛫 STATE MACHINE: Status updated to: {self.aircraft_status.value}")
+                        print(f"🛫 STATE MACHINE: Status change complete!")
                 elif info.area == AircraftArea.ON_RUNWAY:
                     if self.aircraft_status == AircraftStatus.HOLDING_SHORT:
                         self.aircraft_status = AircraftStatus.LINED_UP
-                        print(f"Status updated to: {self.aircraft_status.value}")
+                        if self.debug:
+                            print(f"Status updated to: {self.aircraft_status.value}")
                     elif self.aircraft_status == AircraftStatus.LINED_UP:
                         self.aircraft_status = AircraftStatus.TAKEOFF
-                        print(f"Status updated to: {self.aircraft_status.value}")
+                        if self.debug:
+                            print(f"Status updated to: {self.aircraft_status.value}")
                 elif info.area == AircraftArea.IN_FLIGHT:
                     if self.aircraft_status == AircraftStatus.TAKEOFF:
                         self.aircraft_status = AircraftStatus.CLIMBING
-                        print(f"Status updated to: {self.aircraft_status.value}")
+                        if self.debug:
+                            print(f"Status updated to: {self.aircraft_status.value}")
                     elif self.aircraft_status == AircraftStatus.CLIMBING:
                         self.aircraft_status = AircraftStatus.CRUISING
-                        print(f"Status updated to: {self.aircraft_status.value}")
+                        if self.debug:
+                            print(f"Status updated to: {self.aircraft_status.value}")
+            else:
+                if self.debug:
+                    print(f"Position detector NOT available!")
             
-            print(f"=== Position Update Complete ===\n")
-            print(f"[LOCK] update_position releasing state_lock")
+            if self.debug:
+                print(f"=== Position Update Complete ===\n")
+                print(f"[LOCK] update_position releasing state_lock")
         
         # Do expensive operations outside the lock
         if first_position and position is not None:
@@ -671,15 +700,18 @@ class ATCStateManager:
             return self._get_dynamic_message(transition_key)
     
     def process_response(self, response: str, current_frequency: str = None) -> bool:
-        """Process a pilot response and update state if valid"""
-        print(f"\n=== Processing Pilot Response ===")
+        """Process a pilot response and update the ATC state accordingly"""
+        print(f"=== Processing Pilot Response ===")
         print(f"Response: '{response}'")
         print(f"Current State: {self.current_state.value}")
         print(f"Current Status: {self.aircraft_status.value}")
         print(f"Current Callsign: {self.callsign}")
         
-        # Use current callsign directly for response matching
+        # Get the current callsign
         current_callsign = self.callsign
+        if not current_callsign:
+            print("No callsign available")
+            return False
         
         # Define expected responses based on current state and status
         if self.current_state == ATCState.GROUND and self.aircraft_status == AircraftStatus.AT_GATE:
@@ -749,6 +781,29 @@ class ATCStateManager:
                 print("=== Response Processing Complete ===")
                 return True
             
+            # Handle taxi readback when aircraft is taxiing
+            elif self.current_state == ATCState.GROUND and self.aircraft_status == AircraftStatus.TAXIING:
+                # Check for taxi readback (acknowledging the taxi clearance)
+                # Make it more flexible to match the actual message format
+                print(f"DEBUG: Checking taxi readback - Response: '{response}'")
+                print(f"DEBUG: Contains 'taxi to runway': {'taxi to runway' in response.lower()}")
+                print(f"DEBUG: Contains callsign '{current_callsign}': {current_callsign in response}")
+                
+                if "taxi to runway" in response.lower() and current_callsign in response:
+                    print("MATCH FOUND! Processing taxi readback...")
+                    
+                    # Send acknowledgment
+                    ack_message = f"Roger, {current_callsign}. Report when ready."
+                    print(f"Sending ATC message: '{ack_message}'")
+                    self.message_sender.send_message(
+                        ack_message, 
+                        self.current_state, 
+                        self.radio_frequencies.get_frequency(self.current_state).frequency
+                    )
+                    
+                    print("=== Response Processing Complete ===")
+                    return True
+            
             # Check for "ready for taxi" request
             expected_taxi_request = f"Ground, ready for taxi, {current_callsign}"
             if response.strip().lower() == expected_taxi_request.lower():
@@ -776,6 +831,83 @@ class ATCStateManager:
                 print("=== Response Processing Complete ===")
                 return True
         
+        # Handle "ready for takeoff" report when at holding point
+        elif self.current_state == ATCState.GROUND and self.aircraft_status == AircraftStatus.HOLDING_SHORT:
+            expected_ready_report = f"Ready for takeoff, {current_callsign}"
+            if response.strip().lower() == expected_ready_report.lower():
+                print("MATCH FOUND! Processing ready for takeoff report...")
+                
+                # Get controller names and frequencies
+                ground_name = self.get_controller_name(ATCState.GROUND)
+                tower_name = self.get_controller_name(ATCState.TOWER)
+                tower_freq = self.radio_frequencies.get_frequency(ATCState.TOWER).frequency
+                
+                # Send handoff message
+                handoff_message = f"{current_callsign}, contact {tower_name} {tower_freq}"
+                print(f"Sending ATC message: '{handoff_message}'")
+                self.message_sender.send_message(
+                    handoff_message, 
+                    self.current_state, 
+                    self.radio_frequencies.get_frequency(self.current_state).frequency
+                )
+                
+                # Transition to Tower
+                self.current_state = ATCState.TOWER
+                print(f"State transition: GROUND -> TOWER")
+                
+                print("=== Response Processing Complete ===")
+                return True
+        
+        # Handle Tower state - ready for takeoff report
+        elif self.current_state == ATCState.TOWER and self.aircraft_status == AircraftStatus.HOLDING_SHORT:
+            # Check for "ready for takeoff" report to Tower
+            expected_tower_ready = f"ready for takeoff, {current_callsign.lower()}"
+            print(f"🔍 DEBUG: Checking Tower ready for takeoff")
+            print(f"🔍 DEBUG: Response: '{response}'")
+            print(f"🔍 DEBUG: Expected: '{expected_tower_ready}'")
+            print(f"🔍 DEBUG: Response lower: '{response.lower()}'")
+            print(f"🔍 DEBUG: Contains expected: {expected_tower_ready in response.lower()}")
+            if expected_tower_ready in response.lower():
+                print("MATCH FOUND! Processing Tower ready for takeoff report...")
+                
+                # Get active runway
+                active_runway = self.airport_manager.get_active_runway(0)  # 0 = no wind data
+                if not active_runway and self.airport_manager.runways:
+                    active_runway = self.airport_manager.runways[0]  # Use first runway as fallback
+                
+                # Issue takeoff clearance
+                if active_runway:
+                    takeoff_message = f"{current_callsign}, cleared for takeoff Runway {active_runway.name}"
+                else:
+                    takeoff_message = f"{current_callsign}, cleared for takeoff"
+                
+                print(f"Sending ATC message: '{takeoff_message}'")
+                self.message_sender.send_message(
+                    takeoff_message, 
+                    self.current_state, 
+                    self.radio_frequencies.get_frequency(self.current_state).frequency
+                )
+                
+                # Update status to TAKEOFF
+                self.aircraft_status = AircraftStatus.TAKEOFF
+                print(f"Status: HOLDING_SHORT -> TAKEOFF")
+                
+                print("=== Response Processing Complete ===")
+                return True
+        
+        # Manual position detection trigger for testing
+        elif response.strip().lower() == "test position":
+            print("🧪 Manual position detection test triggered")
+            if self.position_detector and self.current_position:
+                print(f"🧪 Testing position detection at {self.current_position}")
+                info = self.position_detector.detect_position(self.current_position, getattr(self, 'current_heading', 0))
+                print(f"🧪 Position detection result: {info.area.value}")
+                print(f"🧪 Current status: {self.aircraft_status.value}")
+                return True
+            else:
+                print(f"🧪 Position detector not available or no position")
+                return True
+        
         print("No matching transition found")
         print("=== Response Processing Complete ===")
         return False
@@ -786,6 +918,8 @@ class ATCStateManager:
         print(f"Message: {message}")
         print(f"Callsign: {callsign}")
         print(f"Frequency: {current_frequency}")
+        print(f"Current State: {self.current_state.value}")
+        print(f"Current Status: {self.aircraft_status.value}")
         
         # Update callsign if provided and not empty
         if callsign and callsign.strip() and callsign.strip() != self.callsign:
@@ -829,8 +963,8 @@ class ATCStateManager:
             self.message_sender.close()
 
 class ATCController:
-    def __init__(self, airport_manager):
-        self.state_manager = ATCStateManager(airport_manager)
+    def __init__(self, airport_manager, debug: bool = False):
+        self.state_manager = ATCStateManager(airport_manager, debug=debug)
         self.message_queue = queue.Queue()
         self.running = False
         self.controller_thread = None
