@@ -5,7 +5,11 @@ This project provides a foundation for simulating virtual Air Traffic Control (A
 ## Features
 - **Position Detection**: Real-time detection of aircraft position on the airport (parking, taxiway, holding point, runway, in flight)
 - **GUI Visualization**: Live GUI to monitor aircraft ground state and debug position detection
-- **ATC Communication**: Basic proof-of-concept for ATC-pilot communication with state management
+- **Complete ATC Communication System**: Full ATC-pilot communication with realistic phraseology and state management
+- **Dynamic Taxi Routing**: Intelligent pathfinding for taxi routes with hold short instructions
+- **Multi-State ATC**: Ground, Tower, and frequency handoff management
+- **Real-time Position Updates**: UDP-based position detection with callback system
+- **Hot Reload**: Development-friendly system with Ctrl+R hot reload capability
 - **Ground Handling Concepts**: Reference documentation and data structures for modeling ground operations
 - **Open for Community Expansion**: Designed for Aerofly users and the wider flight sim community to contribute and expand
 
@@ -26,17 +30,27 @@ This project provides a foundation for simulating virtual Air Traffic Control (A
 4. Use the "Save Position" button to export the current state for debugging or sharing.
 ![screenshot of the position GUI open](screenshots/screenshot_position_gui_open_data_sender.png)
 
-### Running the ATC Communication
-1. Start the ATC state manager:
+### Running the Complete ATC System
+1. Start the main ATC system:
    ```bash
-   python atc_state_manager.py
+   python3 main.py
    ```
-2. Start the radio display:
-   ```bash
-   python radio_display.py
-   ```
-3. Enter your callsign in the radio display
-4. Use the radio display to communicate with ATC following standard phraseology
+2. The system will automatically:
+   - Initialize the ATC state manager
+   - Start the radio display GUI
+   - Begin UDP position detection
+   - Set up position callbacks
+3. Use the radio display to communicate with ATC following standard phraseology
+4. **Hot Reload**: Press Ctrl+R during development to reload the system while preserving state
+
+### ATC Communication Sequence
+The system supports the complete departure sequence:
+1. **Pushback Request**: "Ground, requesting pushback, [callsign]"
+2. **Taxi Clearance**: "Ground, ready for taxi, [callsign]"
+3. **Hold Short**: Automatic detection when at holding points
+4. **Ready Report**: "Ready for takeoff, [callsign]"
+5. **Tower Handoff**: Automatic frequency change to Tower
+6. **Takeoff Clearance**: "Tower, [callsign], ready for takeoff"
 
 ## Project Structure
 - `position_detector.py` — Core logic for detecting aircraft ground state
@@ -70,13 +84,15 @@ Open source — feel free to use, modify, and share.
 ![Screenshot of the map visualizing the JSON data and the threshold areas](screenshots/airport_area_visualizer.png)
 
 ### Current Status
-- **Proof of Concept:** Currently, the system works only for Graz Airport (Austria), specifically taxiway D to runway 17C.
-- The structure is ready for quick expansion: just add more airport data files and update references.
-- **ATC Communication:** Basic implementation of ATC-pilot communication with state management. Supports:
-  - Callsign management
-  - Basic ATC phraseology
-  - State transitions for ground operations
-  - Radio frequency management
+- **Fully Functional ATC System:** Complete departure sequence from pushback to takeoff clearance
+- **Graz Airport Support:** Currently optimized for Graz Airport (Austria) with dynamic taxi routing
+- **Extensible Architecture:** Easy to add new airports by creating JSON data files
+- **Advanced ATC Communication:** Full implementation with realistic phraseology:
+  - Multi-state ATC (Ground, Tower, Departure)
+  - Dynamic taxi routing with hold short instructions
+  - Automatic position detection and status updates
+  - Real-time frequency handoffs
+  - Complete departure sequence support
 
 ---
 
