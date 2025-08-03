@@ -60,4 +60,14 @@
 - [ ] Implement AI ATC controllers
 - [ ] Add advanced voice recognition
 - [ ] Create custom phrase templates
-- [ ] Add communication replay system 
+- [ ] Add communication replay system
+
+## High Priority
+- [ ] Fix taxi route calculation in ATC system
+  - Debug why position detection isn't properly updating taxi instructions
+  - Add proper taxi route calculation based on actual airport layout
+  - Remove hardcoded "via Alpha, Bravo" default route
+  - Add debug logging to track position updates and route calculations
+
+## Medium Priority
+// ... existing code ... 

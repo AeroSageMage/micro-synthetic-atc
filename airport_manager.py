@@ -225,7 +225,7 @@ class AirportManager:
         return active_runway
     
     def get_taxi_route(self, start: Tuple[float, float], end: Tuple[float, float]) -> List[str]:
-        """Generate a taxi route between two points using the taxiway network."""
+        """Generate a taxi route between two points using the taxiway network, including hold short instructions."""
         if not self.taxiways:
             return []
             
@@ -243,28 +243,50 @@ class AirportManager:
         
         # If we're already on the same taxiway as the destination
         if current_taxiway[0] == end_taxiway[0]:
-            return [current_taxiway[0]]
+            route = [current_taxiway[0]]
+        else:
+            # Try to find a path through connected taxiways
+            visited = set()
+            queue = [(current_taxiway[0], [current_taxiway[0]])]
             
-        # Try to find a path through connected taxiways
-        visited = set()
-        queue = [(current_taxiway[0], [current_taxiway[0]])]
+            while queue:
+                current, path = queue.pop(0)
+                if current == end_taxiway[0]:
+                    route = path
+                    break
+                    
+                if current in visited:
+                    continue
+                    
+                visited.add(current)
+                
+                # Find connected taxiways
+                for taxiway in self.taxiways:
+                    if taxiway.name != current and self._are_taxiways_connected(current, taxiway.name):
+                        queue.append((taxiway.name, path + [taxiway.name]))
         
-        while queue:
-            current, path = queue.pop(0)
-            if current == end_taxiway[0]:
-                return path
-                
-            if current in visited:
-                continue
-                
-            visited.add(current)
+        if not route:
+            return []
+        
+        # Now enhance the route with hold short instructions
+        enhanced_route = []
+        for i, taxiway in enumerate(route):
+            enhanced_route.append(taxiway)
             
-            # Find connected taxiways
-            for taxiway in self.taxiways:
-                if taxiway.name != current and self._are_taxiways_connected(current, taxiway.name):
-                    queue.append((taxiway.name, path + [taxiway.name]))
+            # Check if there are holding points between this taxiway and the next
+            if i < len(route) - 1:
+                next_taxiway = route[i + 1]
+                
+                # Find holding points that might be between these taxiways
+                for holding_point in self.holding_points:
+                    # Check if holding point is associated with a runway we might cross
+                    if holding_point.associated_with:
+                        # Add hold short instruction for this runway
+                        hold_instruction = f"HOLD_SHORT_{holding_point.associated_with}"
+                        enhanced_route.append(hold_instruction)
+                        break  # Only add one hold short per taxiway transition
         
-        return []
+        return enhanced_route
     
     def _find_nearest_taxiway_segment(self, position: Tuple[float, float]) -> Optional[Tuple[Tuple[str, int], float]]:
         """Find the nearest taxiway segment to a position."""

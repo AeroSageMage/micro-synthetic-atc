@@ -30,7 +30,7 @@ class RadioDisplay:
         }
         
         # Initialize UDP receiver for simulator data only
-        self.sim_udp_receiver = UDPReceiver()
+        self.sim_udp_receiver = None  # We'll use the position detector's UDP receiver instead
         self.running = False
         self.update_thread = None
         
@@ -109,10 +109,14 @@ class RadioDisplay:
 
     def apply_aircraft_selection(self):
         """Apply the selected aircraft and callsign"""
+        print("=== Starting apply_aircraft_selection ===")
+        
         if hasattr(self, 'selected_aircraft'):
             callsign = self.callsign_entry.get().strip()
             if not callsign:
                 callsign = self.aircraft_info['callsign']
+            
+            print(f"Creating AircraftInfo for {callsign} ({self.selected_aircraft.icao_code})")
             
             # Create AircraftInfo object
             aircraft_info = AircraftInfo(
@@ -129,12 +133,18 @@ class RadioDisplay:
                 runway_landing=self.selected_aircraft.runway_landing
             )
             
+            print("Calling atc_state_manager.set_aircraft()")
             # Update ATC state manager
             self.atc_state_manager.set_aircraft(aircraft_info)
+            print("atc_state_manager.set_aircraft() completed")
             
+            print("Updating aircraft info display")
             # Update aircraft info display
             self.update_aircraft_info('type', f"{aircraft_info.type} ({aircraft_info.name})")
             self.update_aircraft_info('callsign', aircraft_info.callsign)
+            print("=== apply_aircraft_selection completed ===")
+        else:
+            print("No aircraft selected!")
 
     def create_frequency_and_swap(self):
         # Active frequency display
@@ -278,8 +288,13 @@ class RadioDisplay:
         send_button.pack(side=tk.RIGHT, padx=5, pady=5)
         
         # Bind Enter key to send message
-        self.message_entry.bind('<Return>', self.send_pilot_message)
-        input_frame.bind('<Return>', self.send_pilot_message)
+        self.message_entry.bind('<Return>', self.on_enter_pressed)
+        self.message_entry.bind('<KP_Enter>', self.on_enter_pressed)
+
+    def on_enter_pressed(self, event):
+        """Handle Enter key press in the message entry"""
+        self.send_pilot_message()
+        return 'break'
 
     def create_readback(self):
         """Create a readback of the last ATC message"""
@@ -374,6 +389,9 @@ class RadioDisplay:
                 
             except Exception as e:
                 print(f"Error sending pilot message: {e}")
+        
+        # Return 'break' to prevent default behavior
+        return 'break'
 
     def display_atc_message(self, message):
         """Display an ATC message in the message area"""
@@ -411,37 +429,53 @@ class RadioDisplay:
         
     def _update_ui_in_main_thread(self):
         """Update UI elements in the main thread"""
-        # Get current state and expected response
-        current_state = self.atc_state_manager.current_state
-        expected_response = self.atc_state_manager.get_expected_response()
+        print("=== Starting _update_ui_in_main_thread ===")
         
-        # Update frequency display
-        current_freq = self.atc_state_manager.get_current_frequency()
-        self.active_freq = float(current_freq.frequency)
-        self.active_label.config(text=f"{self.active_freq:.3f}")
-        
-        # Update callsign if it changed in the state manager
-        if self.atc_state_manager.callsign != self.aircraft_info['callsign']:
-            self.update_aircraft_info('callsign', self.atc_state_manager.callsign)
-        
-        # Enable/disable buttons based on state
-        if expected_response:
-            self.readback_button.config(state='normal' if expected_response.requires_readback else 'disabled')
-            self.wilco_button.config(state='normal' if expected_response.requires_acknowledgment else 'disabled')
-            self.ready_button.config(state='normal' if expected_response.requires_ready_report else 'disabled')
-        else:
-            # Disable all response buttons if no response expected
-            self.readback_button.config(state='disabled')
-            self.wilco_button.config(state='disabled')
-            self.ready_button.config(state='disabled')
+        try:
+            # Get current state and expected response
+            print("Getting current state...")
+            current_state = self.atc_state_manager.current_state
+            print(f"Current state: {current_state}")
+            
+            print("Getting expected response...")
+            expected_response = self.atc_state_manager.get_expected_response()
+            print(f"Expected response: {expected_response}")
+            
+            # Update frequency display
+            print("Getting current frequency...")
+            current_freq = self.atc_state_manager.get_current_frequency()
+            self.active_freq = float(current_freq.frequency)
+            self.active_label.config(text=f"{self.active_freq:.3f}")
+            print(f"Updated frequency: {self.active_freq}")
+            
+            # Update callsign if it changed in the state manager
+            if self.atc_state_manager.callsign != self.aircraft_info['callsign']:
+                print("Updating callsign...")
+                self.update_aircraft_info('callsign', self.atc_state_manager.callsign)
+            
+            # Enable/disable buttons based on state
+            print("Updating button states...")
+            if expected_response:
+                self.readback_button.config(state='normal' if expected_response.requires_readback else 'disabled')
+                self.wilco_button.config(state='normal' if expected_response.requires_acknowledgment else 'disabled')
+                self.ready_button.config(state='normal' if expected_response.requires_ready_report else 'disabled')
+            else:
+                # Disable all response buttons if no response expected
+                self.readback_button.config(state='disabled')
+                self.wilco_button.config(state='disabled')
+                self.ready_button.config(state='disabled')
+            
+            print("=== _update_ui_in_main_thread completed ===")
+            
+        except Exception as e:
+            print(f"Error in _update_ui_in_main_thread: {e}")
+            import traceback
+            traceback.print_exc()
 
     def start_reception(self):
         """Start receiving UDP data"""
         self.running = True
         self.start_button.config(text="Stop Receiving")
-        
-        # Start simulator data reception
-        self.sim_udp_receiver.start_receiving()
         
         # Start update thread
         self.update_thread = threading.Thread(target=self.update_aircraft_info_loop)
@@ -452,27 +486,44 @@ class RadioDisplay:
         """Stop receiving UDP data"""
         self.running = False
         self.start_button.config(text="Start Receiving")
-        self.sim_udp_receiver.stop()
         
     def update_aircraft_info_loop(self):
         """Continuously update aircraft information"""
         while self.running:
-            # Update simulator data
-            data = self.sim_udp_receiver.get_latest_data()
-            if data['gps'] and data['attitude']:
-                gps = data['gps']
-                attitude = data['attitude']
+            try:
+                # Check if position detector exists and has a UDP receiver
+                if (hasattr(self.atc_state_manager, 'position_detector') and 
+                    self.atc_state_manager.position_detector is not None and 
+                    hasattr(self.atc_state_manager.position_detector, 'udp_receiver') and 
+                    self.atc_state_manager.position_detector.udp_receiver is not None):
+                    
+                    data = self.atc_state_manager.position_detector.udp_receiver.get_latest_data()
+                    if data and data.get('gps') and data.get('attitude'):
+                        gps = data['gps']
+                        attitude = data['attitude']
+                        
+                        # Use root.after() to update GUI elements from main thread
+                        self.root.after(0, self._update_position_info, gps, attitude)
+                else:
+                    # If position detector or UDP receiver is not ready, wait a bit longer
+                    time.sleep(2.0)
+                    continue
+                    
+            except Exception as e:
+                print(f"Error updating aircraft info: {e}")
+                time.sleep(2.0)
+                continue
                 
-                # Update only the read-only fields
-                self.update_aircraft_info('position', f"{gps.latitude:.4f}, {gps.longitude:.4f}")
-                self.update_aircraft_info('altitude', f"{gps.altitude:.0f} ft")
-                self.update_aircraft_info('heading', f"{attitude.true_heading:.0f}°")
-                
-                # Update aircraft status in state manager
-                # This would need to be implemented based on position and other factors
-                # self.atc_state_manager.update_aircraft_status(new_status)
-            
             time.sleep(1.0)  # Update every second
+
+    def _update_position_info(self, gps, attitude):
+        """Update position info from main thread"""
+        try:
+            self.update_aircraft_info('position', f"{gps.latitude:.4f}, {gps.longitude:.4f}")
+            self.update_aircraft_info('altitude', f"{gps.altitude:.0f} ft")
+            self.update_aircraft_info('heading', f"{attitude.true_heading:.0f}°")
+        except Exception as e:
+            print(f"Error updating position info: {e}")
 
     def create_control_buttons(self):
         """Create control buttons for the radio display"""

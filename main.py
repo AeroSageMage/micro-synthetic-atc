@@ -6,16 +6,27 @@ import threading
 import time
 import signal
 import sys
+from position_detector import PositionDetector
+
+# Global variables for signal handler
+atc_controller = None
+position_detector = None
+root = None
 
 def signal_handler(sig, frame):
     print("\nShutting down...")
-    if 'atc_controller' in globals():
+    global atc_controller, position_detector, root
+    if atc_controller:
         atc_controller.stop()
-    if 'root' in globals():
+    if position_detector:
+        position_detector.udp_receiver.stop()
+    if root:
         root.quit()
     sys.exit(0)
 
 def main():
+    global atc_controller, position_detector, root
+    
     # Set up signal handlers for graceful shutdown
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
@@ -24,16 +35,24 @@ def main():
         # Initialize airport manager
         airport_manager = AirportManager("./airport_data/lowg_airport.json")
         
-        # Initialize ATC controller
+        # Create ATC controller
         atc_controller = ATCController(airport_manager)
-        atc_controller.start()
         
-        # Create and run the UI
+        # Create root window
         root = tk.Tk()
-        app = RadioDisplay(root, atc_controller.state_manager)
         
-        # Connect the radio display to the message sender
-        atc_controller.state_manager.message_sender.set_radio_display(app)
+        # Create radio display with both required arguments
+        radio_display = RadioDisplay(
+            root,
+            atc_controller.state_manager
+        )
+        
+        # Connect radio display to message sender
+        atc_controller.state_manager.message_sender.set_radio_display(radio_display)
+        
+        # Create position detector and connect it to ATC state manager
+        position_detector = PositionDetector(airport_manager, atc_controller.state_manager)
+        atc_controller.state_manager.set_position_detector(position_detector)
         
         # Print initial state
         print(f"Initial state: {atc_controller.state_manager.current_state}")
@@ -41,18 +60,32 @@ def main():
         print(f"Initial frequency: {atc_controller.state_manager.get_current_frequency().frequency} MHz")
         print("\nATC system is running. Press Ctrl+C to stop.")
         
-        # Start the UI main loop
+        # Start UDP receiver first
+        position_detector.udp_receiver.start_receiving()
+        
+        # Start position detection in a separate thread
+        position_detector_thread = threading.Thread(target=position_detector.run)
+        position_detector_thread.daemon = True
+        position_detector_thread.start()
+        
+        # Run the UI
         root.mainloop()
         
     except KeyboardInterrupt:
         print("\nShutting down...")
-        atc_controller.stop()
-        root.quit()
+        if atc_controller:
+            atc_controller.stop()
+        if position_detector:
+            position_detector.udp_receiver.stop()
+        if root:
+            root.quit()
     except Exception as e:
         print(f"Error: {e}")
-        if 'atc_controller' in locals():
+        if atc_controller:
             atc_controller.stop()
-        if 'root' in locals():
+        if position_detector:
+            position_detector.udp_receiver.stop()
+        if root:
             root.quit()
         sys.exit(1)
 

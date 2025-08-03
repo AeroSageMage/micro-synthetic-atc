@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple, List, Dict, TYPE_CHECKING
 import json
 import time
 from enum import Enum, auto
@@ -10,14 +10,10 @@ import logging
 from datetime import datetime
 import math
 from utils.geo_utils import haversine_distance, calculate_heading, distance_to_segment
+from shared_enums import AircraftArea
 
-class AircraftArea(Enum):
-    NOT_DETECTED = auto()
-    AT_PARKING = auto()
-    ON_TAXIWAY = auto()
-    AT_HOLDING_POINT = auto()
-    ON_RUNWAY = auto()
-    IN_FLIGHT = auto()
+if TYPE_CHECKING:
+    from atc_state_manager import ATCStateManager
 
 @dataclass
 class PositionInfo:
@@ -30,8 +26,9 @@ class PositionInfo:
     speed: Optional[float] = None
 
 class PositionDetector:
-    def __init__(self, airport_manager: AirportManager):
+    def __init__(self, airport_manager: AirportManager, atc_state_manager: Optional["ATCStateManager"] = None):
         self.airport_manager = airport_manager
+        self.atc_state_manager = atc_state_manager
         self.udp_receiver = UDPReceiver()
         self.last_position = None
         self.last_update = None
@@ -44,6 +41,10 @@ class PositionDetector:
         )
         self.logger = logging.getLogger(__name__)
         
+    def set_atc_state_manager(self, atc_state_manager: "ATCStateManager"):
+        """Set the ATC state manager to update with position information"""
+        self.atc_state_manager = atc_state_manager
+
     def start(self):
         """Start the position detection system."""
         print(f"Starting position detection for {self.airport_manager.name} ({self.airport_manager.icao})")
@@ -52,6 +53,10 @@ class PositionDetector:
     def detect_position(self, coordinates: Tuple[float, float], heading: float) -> PositionInfo:
         """Detect the aircraft's position and provide detailed information."""
         lat, lon = coordinates
+        
+        # Update ATC state manager if available
+        if self.atc_state_manager:
+            self.atc_state_manager.update_position(coordinates, heading)
         
         # Initialize with default NOT_DETECTED area
         info = PositionInfo(
@@ -151,11 +156,13 @@ class PositionDetector:
     def run(self):
         """Run the position detector."""
         print(f"Starting position detection for {self.airport_manager.name} ({self.airport_manager.icao})")
-        self.start()  # Start the UDP receiver
+        # Don't call self.start() here since we're calling run() directly
         
         try:
             while True:
                 data = self.udp_receiver.get_latest_data()
+                print(f"UDP data received: {data}")  # Debug: see what data we're getting
+                
                 if data['gps'] and data['attitude']:
                     gps = data['gps']
                     attitude = data['attitude']
@@ -169,76 +176,24 @@ class PositionDetector:
                     self.last_position = position
                     self.last_update = time.time()
                     
-                    # Initialize with default NOT_DETECTED area
-                    info = PositionInfo(
-                        area=AircraftArea.NOT_DETECTED,
-                        heading=attitude.true_heading,
-                        speed=gps.ground_speed
-                    )
+                    # Call detect_position to update ATC state manager
+                    info = self.detect_position(position, attitude.true_heading)
                     
-                    # 1. Check if in flight (most restrictive criteria)
-                    is_in_flight = (
-                        gps.altitude > 500 and  # Above 500 meters
-                        gps.ground_speed > 50  # Moving faster than taxi speed
-                    )
+                    # Print position info for debugging
+                    print(f"Position detected: {info.area.value} at {position[0]:.6f}, {position[1]:.6f}")
+                    if info.specific_location:
+                        print(f"  Location: {info.specific_location}")
+                    if info.taxiway:
+                        print(f"  Taxiway: {info.taxiway}")
+                    if info.runway:
+                        print(f"  Runway: {info.runway}")
                     
-                    self.logger.debug(f"In Flight Check - Altitude > 500: {gps.altitude > 500}, Speed > 50: {gps.ground_speed > 50}")
-                    
-                    if is_in_flight:
-                        info.area = AircraftArea.IN_FLIGHT
-                        return info
-                        
-                    # 2. Check if stationary (ground speed < 0.5 m/s)
-                    if gps.ground_speed < 0.5:
-                        # Check parking first when stationary
-                        parking = self.airport_manager.get_nearest_parking(position)
-                        if parking and parking.distance_to(position) < 0.00005:  # Within 5 meters
-                            info.area = AircraftArea.AT_PARKING
-                            info.specific_location = parking.name
-                            return info
-                            
-                    # 3. Check if on taxiway (if moving)
-                    if gps.ground_speed > 0.5:
-                        taxiway = self.airport_manager.get_nearest_taxiway(position)
-                        if taxiway:
-                            distance = taxiway.distance_to(position)
-                            if distance < 0.00005:  # Within 5 meters
-                                info.area = AircraftArea.ON_TAXIWAY
-                                info.taxiway = taxiway.name
-                                info.distance_to_center = distance
-                                return info
-                                
-                    # 4. Check if at holding point (if moving)
-                    if gps.ground_speed > 0.5:
-                        holding_point = self.airport_manager.is_at_holding_point(position)
-                        if holding_point:
-                            info.area = AircraftArea.AT_HOLDING_POINT
-                            info.specific_location = holding_point.name
-                            info.runway = holding_point.associated_with
-                            return info
-                            
-                    # 5. Check if on runway (most restrictive criteria)
-                    if gps.ground_speed > 0.5:
-                        for runway in self.airport_manager.runways:
-                            # First check if between thresholds
-                            is_between_thresholds = self.airport_manager.is_on_runway(position, runway)
-                            if is_between_thresholds:
-                                # Then check distance to center line
-                                distance_to_center = runway.distance_to_center(position)
-                                if distance_to_center < runway.width / 2:  # Within runway width
-                                    # Additional check: must be moving in runway direction
-                                    heading_diff = abs((attitude.true_heading - runway.heading) % 360)
-                                    if heading_diff < 45 or heading_diff > 315:  # Within 45 degrees of runway heading
-                                        info.area = AircraftArea.ON_RUNWAY
-                                        info.runway = runway.name
-                                        info.distance_to_center = distance_to_center
-                                        return info
-                    
-                    self.logger.debug("\nAircraft not detected in any area")
-                    return info
                 else:
+                    print("No GPS or Attitude data received from UDP")  # Debug: see when no data
                     self.logger.debug("No GPS or Attitude data received")
-                    time.sleep(1)
+                
+                # Sleep longer to prevent GUI freezing
+                time.sleep(2.0)  # Changed from 1.0 to 2.0 seconds
                 
         except KeyboardInterrupt:
             print("\nStopping position detection...")
