@@ -289,7 +289,14 @@ class ATCStateManager:
         current_time = time.time()
         if hasattr(self, '_last_taxi_calc') and current_time - self._last_taxi_calc < 1.0:
             # Return cached result if called too frequently
-            return getattr(self, '_cached_taxi_route', "via Alpha, Bravo")
+            cached_route = getattr(self, '_cached_taxi_route', "via Alpha, Bravo")
+            print(f"🔄 Using cached route: {cached_route}")
+            return cached_route
+        
+        # Clear any previous cached route for fresh calculation
+        if hasattr(self, '_cached_taxi_route'):
+            print(f"🗑️ Clearing cached route: {self._cached_taxi_route}")
+            delattr(self, '_cached_taxi_route')
         
         self._last_taxi_calc = current_time
         
@@ -297,32 +304,33 @@ class ATCStateManager:
         print(f"Current position: {self.current_position}")
         
         if not self.current_position:
-            print("No current position available, using default route")
+            print("❌ No current position available, using default route")
             self._cached_taxi_route = "via Alpha, Bravo"
             return self._cached_taxi_route  # Default if no position available
             
         # Find the runway
         target_runway = next((r for r in self.airport_manager.runways if r.name == runway_name), None)
         if not target_runway:
-            print(f"Runway {runway_name} not found in airport layout")
+            print(f"❌ Runway {runway_name} not found in airport layout")
             print(f"Available runways: {[r.name for r in self.airport_manager.runways]}")
             self._cached_taxi_route = "via Alpha, Bravo"
             return self._cached_taxi_route  # Default if runway not found
             
-        print(f"Found runway {runway_name} at threshold: {target_runway.threshold1_coords}")
+        print(f"✅ Found runway {runway_name} at threshold: {target_runway.threshold1_coords}")
         
         # Use runway threshold as destination
         destination = target_runway.threshold1_coords
         
         # Get taxi route
+        print(f"🔍 Calling get_taxi_route from {self.current_position} to {destination}")
         route = self.airport_manager.get_taxi_route(self.current_position, destination)
         if not route:
-            print("No taxi route found, using default route")
+            print("❌ No taxi route found, using default route")
             print(f"Available taxiways: {[t.name for t in self.airport_manager.taxiways]}")
             self._cached_taxi_route = "via Alpha, Bravo"
             return self._cached_taxi_route  # Default if no route found
             
-        print(f"Calculated route: {route}")
+        print(f"✅ Calculated route: {route}")
         
         # Format route as "via A, B, C" with hold short instructions
         formatted_parts = []
