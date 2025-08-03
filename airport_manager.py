@@ -233,7 +233,11 @@ class AirportManager:
         start_segment = self._find_nearest_taxiway_segment(start)
         end_segment = self._find_nearest_taxiway_segment(end)
         
+        print(f"DEBUG: Start segment: {start_segment}")
+        print(f"DEBUG: End segment: {end_segment}")
+        
         if not start_segment or not end_segment:
+            print("DEBUG: No start or end segment found")
             return []
             
         # Simple pathfinding: find a path through connected taxiways
@@ -241,18 +245,48 @@ class AirportManager:
         current_taxiway = start_segment[0]  # (taxiway_name, segment_index)
         end_taxiway = end_segment[0]
         
+        print(f"DEBUG: Current taxiway: {current_taxiway}")
+        print(f"DEBUG: End taxiway: {end_taxiway}")
+        
+        # Handle apron start (empty taxiway name)
+        if not current_taxiway[0]:  # Empty taxiway name means we're on apron
+            print("DEBUG: Aircraft on apron, finding nearest valid taxiway")
+            # Find the nearest valid taxiway to use as starting point
+            nearest_taxiway = None
+            min_distance = float('inf')
+            
+            for taxiway in self.taxiways:
+                if taxiway.name:  # Only consider taxiways with names
+                    distance = taxiway.distance_to(start)
+                    if distance < min_distance:
+                        min_distance = distance
+                        nearest_taxiway = taxiway.name
+            
+            if nearest_taxiway:
+                print(f"DEBUG: Using nearest taxiway as start: {nearest_taxiway}")
+                current_taxiway = (nearest_taxiway, 0)  # Use the nearest taxiway as starting point
+            else:
+                print("DEBUG: No valid taxiway found near apron")
+                return []
+        
         # If we're already on the same taxiway as the destination
         if current_taxiway[0] == end_taxiway[0]:
             route = [current_taxiway[0]]
+            print(f"DEBUG: Same taxiway, route: {route}")
         else:
             # Try to find a path through connected taxiways
             visited = set()
             queue = [(current_taxiway[0], [current_taxiway[0]])]
             
+            print(f"DEBUG: Starting BFS from {current_taxiway[0]} to {end_taxiway[0]}")
+            
             while queue:
                 current, path = queue.pop(0)
+                print(f"DEBUG: Checking {current} with path {path}")
+                
                 if current == end_taxiway[0]:
                     route = path
+                    print(f"DEBUG: Found route: {route}")
                     break
                     
                 if current in visited:
@@ -261,31 +295,45 @@ class AirportManager:
                 visited.add(current)
                 
                 # Find connected taxiways
+                connected_count = 0
                 for taxiway in self.taxiways:
-                    if taxiway.name != current and self._are_taxiways_connected(current, taxiway.name):
+                    if taxiway.name and taxiway.name != current and self._are_taxiways_connected(current, taxiway.name):
+                        print(f"DEBUG: {current} connected to {taxiway.name}")
                         queue.append((taxiway.name, path + [taxiway.name]))
+                        connected_count += 1
+                
+                print(f"DEBUG: {current} has {connected_count} connections")
         
         if not route:
+            print("DEBUG: No route found")
             return []
         
         # Now enhance the route with hold short instructions
         enhanced_route = []
+        print(f"DEBUG: Base route: {route}")
+        print(f"DEBUG: Holding points: {[hp.name for hp in self.holding_points]}")
+        
         for i, taxiway in enumerate(route):
             enhanced_route.append(taxiway)
             
             # Check if there are holding points between this taxiway and the next
             if i < len(route) - 1:
                 next_taxiway = route[i + 1]
+                print(f"DEBUG: Checking transition from {taxiway} to {next_taxiway}")
                 
                 # Find holding points that might be between these taxiways
                 for holding_point in self.holding_points:
-                    # Check if holding point is associated with a runway we might cross
-                    if holding_point.associated_with:
-                        # Add hold short instruction for this runway
+                    print(f"DEBUG: Checking holding point {holding_point.name} associated with {holding_point.associated_with}")
+                    
+                    # Only add hold short if the holding point is associated with the target runway
+                    # or if we're crossing a runway (simplified logic for now)
+                    if holding_point.associated_with and holding_point.associated_with in ["21L", "21R", "16C", "16L", "16R", "34C", "34L", "34R"]:
+                        print(f"DEBUG: Adding hold short for {holding_point.associated_with}")
                         hold_instruction = f"HOLD_SHORT_{holding_point.associated_with}"
                         enhanced_route.append(hold_instruction)
                         break  # Only add one hold short per taxiway transition
         
+        print(f"DEBUG: Enhanced route: {enhanced_route}")
         return enhanced_route
     
     def _find_nearest_taxiway_segment(self, position: Tuple[float, float]) -> Optional[Tuple[Tuple[str, int], float]]:
